@@ -427,7 +427,7 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
                     activeModifiers.has('ShiftLeft') ||
                     activeModifiers.has('ShiftRight');
 
-                  let charToAdd;
+                  let charToAdd: string;
                   if (isWindowsLetter) {
                     // Windows format: 'A' -> 'a' or 'A'
                     charToAdd = hasShift ? key : key.toLowerCase();
@@ -567,6 +567,36 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
       .filter(Boolean)
       .map((line) => JSON.parse(line));
 
+    // Validate timestamp consistency 
+    this.validateTimestamps(events, sessionId);
+
     return this.processEvents(events);
+  }
+
+  private validateTimestamps(events: InputEvent[], sessionId: string): void {
+    if (events.length === 0) return;
+
+    const timestamps = events.map(e => e.time);
+    const minTime = Math.min(...timestamps);
+    const maxTime = Math.max(...timestamps);
+    const duration = maxTime - minTime;
+
+    // Check if timestamps are relative (starting near 0) or absolute
+    const isRelative = minTime < 60000; // Less than 1 minute suggests relative timestamps
+    
+    console.log(`[TIMESTAMP-VALIDATION] Session ${sessionId}:`);
+    console.log(`  Events: ${events.length}`);
+    console.log(`  Duration: ${(duration / 1000).toFixed(2)}s`);
+    console.log(`  Timestamp type: ${isRelative ? 'relative' : 'absolute'}`);
+    console.log(`  Range: ${minTime}ms - ${maxTime}ms`);
+
+    // Warn if timestamps seem problematic
+    if (!isRelative && duration > 24 * 60 * 60 * 1000) {
+      console.warn(`[TIMESTAMP-WARNING] Very long session duration (${(duration / 3600000).toFixed(1)}h) - may indicate absolute timestamps`);
+    }
+    
+    if (duration <= 0) {
+      console.error(`[TIMESTAMP-ERROR] Invalid duration: ${duration}ms`);
+    }
   }
 }

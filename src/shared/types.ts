@@ -95,11 +95,40 @@ export interface PipelineStage<T, U> {
     process(input: T): Promise<U>;
 }
 
+export interface SchemaVersion {
+    major: number;   // Breaking changes
+    minor: number;   // New features, backward compatible 
+    patch: number;   // Bug fixes
+}
+
 export interface TaskMetadata {
     title?: string;
     description?: string;
     content?: string;
     objectives?: string[];
+}
+
+export interface ManifestData {
+    schema_version: SchemaVersion;
+    demonstration_id: string;
+    user_address: string; 
+    submission_id: string;
+    created_at: string;
+    task: {
+        type: string;
+        description: string;
+        url: string;
+    };
+    environment: {
+        os: string;
+        browser: string;
+        screen_resolution: string;
+    };
+}
+
+export interface SftWrapper {
+    schema_version: SchemaVersion;
+    messages: Message[];
 }
 
 export interface PipelineConfig {

@@ -53,6 +53,7 @@ export interface Message {
     data?: {
         focused_app?: string;
         available_apps?: string[];
+        app_status?: 'launching' | 'ready' | 'unknown';
         all_windows?: Array<{
             name: string;
             role?: string;
@@ -81,6 +82,7 @@ export interface ProcessedEvent {
         }>;
         focused_app?: string;
         available_apps?: string[];
+        app_status?: 'launching' | 'ready' | 'unknown';
         all_windows?: Array<{
             name: string;
             role?: string;

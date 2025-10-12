@@ -188,7 +188,10 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
                     // Preserve structured data for grader while also including human-readable content
                     const focusedApp = event.data.focused_app || 'Unknown';
                     const availableApps = event.data.available_apps || [];
-                    const appFocusAction = `app_focus(focused: "${focusedApp}", available: [${availableApps.join(', ')}])`;
+                    const appStatus = event.data.app_status || 'unknown';
+                    
+                    // Include status in the action for better model understanding
+                    const appFocusAction = `app_focus(focused: "${focusedApp}", status: "${appStatus}", available: [${availableApps.join(', ')}])`;
 
                     console.log(`[FORMATTER-DEBUG] Processing app_focus event: ${appFocusAction}`);
 
@@ -200,6 +203,7 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
                         data: {
                             focused_app: event.data.focused_app,
                             available_apps: event.data.available_apps,
+                            app_status: event.data.app_status,
                             all_windows: event.data.all_windows
                         }
                     });

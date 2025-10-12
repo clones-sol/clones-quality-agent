@@ -1,13 +1,94 @@
-import { PipelineConfig, ProcessedEvent } from '../shared/types';
+import { PipelineConfig, ProcessedEvent, SchemaVersion } from '../shared/types';
 import { visualizeEvents } from '../shared/utils/visualization';
 
 import fs from 'node:fs';
 import path from 'path';
 
 export class Pipeline {
+  private readonly CURRENT_SCHEMA_VERSION: SchemaVersion = { major: 1, minor: 0, patch: 0 };
+
   constructor(private config: PipelineConfig) {}
 
+  private validateSchemaVersion(filePath: string, fileSchema: SchemaVersion): void {
+    const current = this.CURRENT_SCHEMA_VERSION;
+    
+    // Compatible if same major version and file minor <= current minor
+    const isCompatible = fileSchema.major === current.major && fileSchema.minor <= current.minor;
+    
+    if (!isCompatible) {
+      throw new Error(
+        `Schema version incompatible in ${filePath}: ` +
+        `found ${fileSchema.major}.${fileSchema.minor}.${fileSchema.patch}, ` +
+        `expected ${current.major}.x.x with minor <= ${current.minor}`
+      );
+    }
+    
+    console.log(`[SCHEMA] ${filePath}: v${fileSchema.major}.${fileSchema.minor}.${fileSchema.patch} ✓`);
+  }
+
+  private async validateSessionSchemas(sessionId: string): Promise<void> {
+    const sessionDir = path.join(this.config.dataDir, sessionId);
+    
+    // Check meta.json schema version
+    try {
+      const metaPath = path.join(sessionDir, 'meta.json');
+      if (fs.existsSync(metaPath)) {
+        const metaData = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        this.validateSchemaVersion('meta.json', metaData.schema_version);
+      }
+    } catch (error) {
+      console.warn(`[SCHEMA] Could not validate meta.json: ${error}`);
+    }
+
+    // Check manifest.json schema version
+    try {
+      const manifestPath = path.join(sessionDir, 'manifest.json');
+      if (fs.existsSync(manifestPath)) {
+        const manifestData = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        this.validateSchemaVersion('manifest.json', manifestData.schema_version);
+      }
+    } catch (error) {
+      console.warn(`[SCHEMA] Could not validate manifest.json: ${error}`);
+    }
+
+    // Check sft.json schema version  
+    try {
+      const sftPath = path.join(sessionDir, 'sft.json');
+      if (fs.existsSync(sftPath)) {
+        const sftData = JSON.parse(fs.readFileSync(sftPath, 'utf-8'));
+        this.validateSchemaVersion('sft.json', sftData.schema_version);
+      }
+    } catch (error) {
+      console.warn(`[SCHEMA] Could not validate sft.json: ${error}`);
+    }
+
+    // Check input_log_meta.json schema version
+    try {
+      const inputLogMetaPath = path.join(sessionDir, 'input_log_meta.json');
+      if (fs.existsSync(inputLogMetaPath)) {
+        const inputLogMetaData = JSON.parse(fs.readFileSync(inputLogMetaPath, 'utf-8'));
+        this.validateSchemaVersion('input_log_meta.json', inputLogMetaData.schema_version);
+      }
+    } catch (error) {
+      console.warn(`[SCHEMA] Could not validate input_log_meta.json: ${error}`);
+    }
+
+    // Check checksums.json schema version
+    try {
+      const checksumsPath = path.join(sessionDir, 'checksums.json');
+      if (fs.existsSync(checksumsPath)) {
+        const checksumsData = JSON.parse(fs.readFileSync(checksumsPath, 'utf-8'));
+        this.validateSchemaVersion('checksums.json', checksumsData.schema_version);
+      }
+    } catch (error) {
+      console.warn(`[SCHEMA] Could not validate checksums.json: ${error}`);
+    }
+  }
+
   async process(sessionId: string): Promise<ProcessedEvent[]> {
+    // Validate schema versions first
+    await this.validateSessionSchemas(sessionId);
+    
     let allEvents: ProcessedEvent[] = [];
 
     // Run extractors first

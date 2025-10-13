@@ -45,6 +45,7 @@ interface InputEvent {
     tree?: Array<{
       name: string;
     }>;
+    app_status?: 'launching' | 'ready' | 'unknown';
     // Nested data structure for other events
     data?: {
       focused_app?: {
@@ -498,38 +499,13 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
         case 'axtree_interaction': {
           flushText();
 
-          // Debug: Show the actual structure of event.data
-          console.log(`[EXTRACTOR-DEBUG] axtree_interaction data structure:`, JSON.stringify(event.data, null, 2));
-
           // Extract focused app and complete window hierarchy from AXTree data
-          const axData = event.data;  // Direct access, no nested .data
+          const axData = event.data;
           if (axData) {
-            const focusedAppShortName = axData.focused_app?.name;
+            const focusedApp = axData.focused_app?.name;
             const availableApps = axData.tree?.map((app: any) => app.name) || [];
             const allWindows = axData.tree || [];
-
-            // Find the focused app's full name in the available apps list to maintain consistency
-            let focusedApp = focusedAppShortName;
-            let appStatus: 'launching' | 'ready' | 'unknown' = 'unknown';
-
-            if (focusedAppShortName && availableApps.length > 0) {
-              // Try to find a match for the focused app in the available apps list
-              const fullNameMatch = availableApps.find(appName =>
-                appName.toLowerCase().includes(focusedAppShortName.toLowerCase()) ||
-                focusedAppShortName.toLowerCase().includes(appName.toLowerCase())
-              );
-              if (fullNameMatch) {
-                focusedApp = fullNameMatch;
-                appStatus = 'ready'; // App is fully loaded and in available list
-              } else {
-                // If no match found in available apps, the app is likely launching
-                appStatus = 'launching';
-                console.log(`[EXTRACTOR-DEBUG] App "${focusedAppShortName}" is launching - focused but not yet in available apps [${availableApps.join(', ')}]`);
-              }
-            } else if (focusedAppShortName) {
-              // Focused app exists but no available apps list
-              appStatus = 'unknown';
-            }
+            const appStatus = axData.app_status || 'unknown'; // Use app_status from Rust
 
             console.log(`[EXTRACTOR-DEBUG] app_focus event - focused: ${focusedApp} (${appStatus}), available: [${availableApps.join(', ')}]`);
 

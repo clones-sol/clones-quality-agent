@@ -369,7 +369,10 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
             if (this.isComboKey(event.data.key)) {
               activeModifiers.add(event.data.key);
               sequenceModifiers.add(event.data.key);
-            } else if (activeModifiers.size > 0 && !activeModifiers.has('Shift')) {
+            } else if (activeModifiers.size > 0 &&
+              !activeModifiers.has('Shift') &&
+              !activeModifiers.has('ShiftLeft') &&
+              !activeModifiers.has('ShiftRight')) {
               // Only treat as hotkey if we have non-Shift modifiers
               let modifiers = Array.from(activeModifiers);
               const finalKey = event.data.key.toString().toLowerCase();
@@ -405,7 +408,9 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
                 console.log(`[EXTRACTOR-DEBUG] Using actual_char: key=${event.data.key} -> char="${actualChar}"`);
               } else {
                 // FALLBACK: Use key mapping (legacy behavior for when actual_char is not available)
-                const hasShift = activeModifiers.has('Shift');
+                const hasShift = activeModifiers.has('Shift') ||
+                  activeModifiers.has('ShiftLeft') ||
+                  activeModifiers.has('ShiftRight');
                 const mappedKey = hasShift
                   ? this.shiftSymbolMap[event.data.key] || this.symbolMap[event.data.key]
                   : this.symbolMap[event.data.key];
@@ -499,10 +504,10 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
             // Find the focused app's full name in the available apps list to maintain consistency
             let focusedApp = focusedAppShortName;
             let appStatus: 'launching' | 'ready' | 'unknown' = 'unknown';
-            
+
             if (focusedAppShortName && availableApps.length > 0) {
               // Try to find a match for the focused app in the available apps list
-              const fullNameMatch = availableApps.find(appName => 
+              const fullNameMatch = availableApps.find(appName =>
                 appName.toLowerCase().includes(focusedAppShortName.toLowerCase()) ||
                 focusedAppShortName.toLowerCase().includes(appName.toLowerCase())
               );
@@ -583,7 +588,7 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
 
     // Check if timestamps are relative (starting near 0) or absolute
     const isRelative = minTime < 60000; // Less than 1 minute suggests relative timestamps
-    
+
     console.log(`[TIMESTAMP-VALIDATION] Session ${sessionId}:`);
     console.log(`  Events: ${events.length}`);
     console.log(`  Duration: ${(duration / 1000).toFixed(2)}s`);
@@ -594,7 +599,7 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
     if (!isRelative && duration > 24 * 60 * 60 * 1000) {
       console.warn(`[TIMESTAMP-WARNING] Very long session duration (${(duration / 3600000).toFixed(1)}h) - may indicate absolute timestamps`);
     }
-    
+
     if (duration <= 0) {
       console.error(`[TIMESTAMP-ERROR] Invalid duration: ${duration}ms`);
     }

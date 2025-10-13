@@ -26,8 +26,10 @@ type KeyId =
 interface InputEvent {
   event: string;
   data: {
-    x?: number;
+    x?: number;  // Normalized coordinates (relative to primary monitor, logical pixels)
     y?: number;
+    raw_x?: number;  // Raw coordinates (may be negative for multi-monitor, physical pixels)
+    raw_y?: number;
     key?: KeyId;
     actual_char?: string;  // Real character typed (layout-aware)
     button?: string;
@@ -299,6 +301,11 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
 
       switch (event.event) {
         case 'mousemove': {
+          // Use normalized coordinates (x, y) which are:
+          // - Relative to primary monitor (0,0 = top-left of primary monitor)
+          // - In logical pixels (DPI-independent)
+          // - Clamped to monitor bounds (no negative values even with multi-monitor)
+          // raw_x/raw_y are also available but may be negative or exceed bounds
           if (event.data.x !== undefined && event.data.y !== undefined) {
             lastKnownPos = { x: event.data.x, y: event.data.y };
             if (mouseDown) {

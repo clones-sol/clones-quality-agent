@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'path';
 import { PipelineStage, ProcessedEvent } from '../../shared/types';
+import { spawnSync } from 'node:child_process';
 
 export class VideoExtractor implements PipelineStage<string, ProcessedEvent[]> {
   constructor(
@@ -13,20 +14,18 @@ export class VideoExtractor implements PipelineStage<string, ProcessedEvent[]> {
     const outputPath = path.join(this.dataDir, 'temp', `frame_${timestamp}.jpg`);
 
     try {
-      const proc = Bun.spawn([
-        this.ffmpegPath,
+      // Use spawnSync instead of Bun.spawn to avoid ENOTCONN issues on Windows compiled binaries
+      const result = spawnSync(this.ffmpegPath, [
         '-ss', (timestamp / 1000).toString(),
         '-i', videoPath,
         '-vframes', '1',
         '-y', outputPath
       ], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-        stdin: 'ignore',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
 
-      await proc.exited;
-      if (proc.exitCode !== 0) return null;
+      if (result.status !== 0) return null;
       if (!fs.existsSync(outputPath)) return null;
 
       const imageBuffer = fs.readFileSync(outputPath);
@@ -61,27 +60,24 @@ export class VideoExtractor implements PipelineStage<string, ProcessedEvent[]> {
       fs.mkdirSync(tempDir, { recursive: true });
     }
 
-    // Get video duration
-    const proc = Bun.spawn([
-      this.ffprobePath,
+    // Get video duration - use spawnSync to avoid ENOTCONN issues on Windows compiled binaries
+    const result = spawnSync(this.ffprobePath, [
       '-v', 'error',
       '-show_entries', 'format=duration',
       '-of', 'default=noprint_wrappers=1:nokey=1',
       videoPath
     ], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      stdin: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      encoding: 'utf-8',
     });
 
-    const stdout = await new Response(proc.stdout).text();
-    await proc.exited;
-
-    if (proc.exitCode !== 0 || !stdout) {
-      const stderr = await new Response(proc.stderr).text();
-      console.error('Failed to get video duration:', stderr);
+    if (result.status !== 0 || !result.stdout) {
+      console.error('Failed to get video duration:', result.stderr);
       return events;
     }
+
+    const stdout = result.stdout;
 
     const durationStr = stdout.trim();
     const durationSecs = Math.floor(parseFloat(durationStr));

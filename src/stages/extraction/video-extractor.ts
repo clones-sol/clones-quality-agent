@@ -1,4 +1,3 @@
-import { execSync } from 'child_process';
 import fs from 'node:fs';
 import path from 'path';
 import { PipelineStage, ProcessedEvent } from '../../shared/types';
@@ -14,15 +13,20 @@ export class VideoExtractor implements PipelineStage<string, ProcessedEvent[]> {
     const outputPath = path.join(this.dataDir, 'temp', `frame_${timestamp}.jpg`);
 
     try {
-      execSync(
-        `${this.ffmpegPath} -ss ${
-          timestamp / 1000
-        } -i "${videoPath}" -vframes 1 -y "${outputPath}"`,
-        {
-          stdio: ['pipe', 'pipe', 'pipe']
-        }
-      );
+      const proc = Bun.spawn([
+        this.ffmpegPath,
+        '-ss', (timestamp / 1000).toString(),
+        '-i', videoPath,
+        '-vframes', '1',
+        '-y', outputPath
+      ], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        stdin: 'ignore',
+      });
 
+      await proc.exited;
+      if (proc.exitCode !== 0) return null;
       if (!fs.existsSync(outputPath)) return null;
 
       const imageBuffer = fs.readFileSync(outputPath);
@@ -58,10 +62,28 @@ export class VideoExtractor implements PipelineStage<string, ProcessedEvent[]> {
     }
 
     // Get video duration
-    const durationStr = execSync(
-      `${this.ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
-      { encoding: 'utf-8' }
-    );
+    const proc = Bun.spawn([
+      this.ffprobePath,
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      videoPath
+    ], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stdin: 'ignore',
+    });
+
+    const stdout = await new Response(proc.stdout).text();
+    await proc.exited;
+
+    if (proc.exitCode !== 0 || !stdout) {
+      const stderr = await new Response(proc.stderr).text();
+      console.error('Failed to get video duration:', stderr);
+      return events;
+    }
+
+    const durationStr = stdout.trim();
     const durationSecs = Math.floor(parseFloat(durationStr));
     const durationMs = durationSecs * 1000;
 

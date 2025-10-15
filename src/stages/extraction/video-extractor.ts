@@ -25,14 +25,24 @@ export class VideoExtractor implements PipelineStage<string, ProcessedEvent[]> {
         windowsHide: true,
       });
 
-      if (result.status !== 0) return null;
-      if (!fs.existsSync(outputPath)) return null;
+      if (result.status !== 0) {
+        if (result.stderr) {
+          console.error(`[VideoExtractor] Failed to extract frame at ${timestamp}ms:`, result.stderr.toString());
+        }
+        return null;
+      }
+      
+      if (!fs.existsSync(outputPath)) {
+        console.error(`[VideoExtractor] Output file not created: ${outputPath}`);
+        return null;
+      }
 
       const imageBuffer = fs.readFileSync(outputPath);
       fs.unlinkSync(outputPath);
 
       return imageBuffer.toString('base64');
-    } catch {
+    } catch (error) {
+      console.error(`[VideoExtractor] Error extracting frame at ${timestamp}ms:`, error);
       return null;
     }
   }
@@ -61,6 +71,9 @@ export class VideoExtractor implements PipelineStage<string, ProcessedEvent[]> {
     }
 
     // Get video duration - use spawnSync to avoid ENOTCONN issues on Windows compiled binaries
+    console.log(`[VideoExtractor] Getting duration for video: ${videoPath}`);
+    console.log(`[VideoExtractor] Using ffprobe: ${this.ffprobePath}`);
+    
     const result = spawnSync(this.ffprobePath, [
       '-v', 'error',
       '-show_entries', 'format=duration',
@@ -73,11 +86,12 @@ export class VideoExtractor implements PipelineStage<string, ProcessedEvent[]> {
     });
 
     if (result.status !== 0 || !result.stdout) {
-      console.error('Failed to get video duration:', result.stderr);
+      console.error('[VideoExtractor] Failed to get video duration:', result.stderr);
       return events;
     }
 
     const stdout = result.stdout;
+    console.log(`[VideoExtractor] Video duration raw output: ${stdout.trim()}`);
 
     const durationStr = stdout.trim();
     const durationSecs = Math.floor(parseFloat(durationStr));

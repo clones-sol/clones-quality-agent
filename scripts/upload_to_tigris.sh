@@ -109,10 +109,21 @@ upload_binaries() {
                 platform="windows"
             fi
             
-            log_info "Processing file: $file_name (platform: $platform)"
+            # Add version to filename
+            local base_name="${file_name%.*}"
+            local extension="${file_name##*.}"
+            local versioned_name
             
-            # Upload directly to cqa folder
-            upload_file "$binary_file" "cqa/$file_name" "$version" "$platform"
+            if [[ "$file_name" == *.* ]]; then
+                versioned_name="${base_name}-v${version}.${extension}"
+            else
+                versioned_name="${base_name}-v${version}"
+            fi
+            
+            log_info "Processing file: $file_name -> $versioned_name (platform: $platform)"
+            
+            # Upload to cqa folder with versioned name
+            upload_file "$binary_file" "cqa/$versioned_name" "$version" "$platform"
         fi
     done
     

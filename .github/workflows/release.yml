@@ -63,7 +63,8 @@ jobs:
 
       - name: Make script executable and upload to Tigris
         run: |
-          ls -la scripts/
+          # Convert Windows line endings to Unix
+          sed -i 's/\r$//' scripts/upload_to_tigris.sh
           chmod +x scripts/upload_to_tigris.sh
           bash scripts/upload_to_tigris.sh
         env:

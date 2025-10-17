@@ -33,33 +33,11 @@ jobs:
           path: target/
           compression-level: 0
 
-  release:
+  upload-to-tigris:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # This is important for getting all tags
-
-      - name: Get version from package.json
-        id: get_version
-        run: |
-          version=$(jq -r .version package.json)
-          echo "Version from package.json: $version"
-          new_tag="v$version"
-          echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
-          echo "Tag for release will be: $new_tag"
-
-      - name: Delete existing release if it exists
-        run: |
-          if gh release view ${{ env.NEW_TAG }} &> /dev/null; then
-            echo "Deleting existing release ${{ env.NEW_TAG }}"
-            gh release delete ${{ env.NEW_TAG }} --yes --cleanup-tag
-          else
-            echo "No existing release found for ${{ env.NEW_TAG }}"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -69,16 +47,22 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts/
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.NEW_TAG }}
-          name: Release ${{ env.NEW_TAG }}
-          draft: false
-          prerelease: false
-          files: artifacts/artifact/*
-          generate_release_notes: true
-          fail_on_unmatched_files: false
-          make_latest: true
+      - name: Prepare target directory
+        run: |
+          mkdir -p target
+          cp -r artifacts/artifact/* target/
+
+      - name: Install AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Upload to Tigris
+        run: ./scripts/upload_to_tigris.sh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TIGRIS_ACCESS_KEY_ID: ${{ secrets.TIGRIS_ACCESS_KEY_ID }}
+          TIGRIS_SECRET_ACCESS_KEY: ${{ secrets.TIGRIS_SECRET_ACCESS_KEY }}

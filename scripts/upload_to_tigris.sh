@@ -94,21 +94,25 @@ upload_binaries() {
     
     log_info "Uploading binaries from: $target_dir"
     
-    # Upload each platform binary directly to cqa folder
-    for platform_dir in "$target_dir"/*; do
-        if [ -d "$platform_dir" ]; then
-            local platform=$(basename "$platform_dir")
-            log_info "Processing platform: $platform"
+    # Upload each binary file directly from target directory
+    for binary_file in "$target_dir"/*; do
+        if [ -f "$binary_file" ] && [[ ! "$binary_file" =~ \.(json|md|txt)$ ]]; then
+            local file_name=$(basename "$binary_file")
             
-            # Find binary file in platform directory
-            for binary_file in "$platform_dir"/*; do
-                if [ -f "$binary_file" ] && [[ ! "$binary_file" =~ \.(json|md|txt)$ ]]; then
-                    local file_name=$(basename "$binary_file")
-                    
-                    # Upload directly to cqa folder
-                    upload_file "$binary_file" "cqa/$file_name" "$version" "$platform"
-                fi
-            done
+            # Determine platform from filename
+            local platform="unknown"
+            if [[ "$file_name" =~ linux ]]; then
+                platform="linux"
+            elif [[ "$file_name" =~ macos ]]; then
+                platform="macos"
+            elif [[ "$file_name" =~ win ]]; then
+                platform="windows"
+            fi
+            
+            log_info "Processing file: $file_name (platform: $platform)"
+            
+            # Upload directly to cqa folder
+            upload_file "$binary_file" "cqa/$file_name" "$version" "$platform"
         fi
     done
     

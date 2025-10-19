@@ -189,9 +189,14 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
                     const focusedApp = event.data.focused_app || 'Unknown';
                     const availableApps = event.data.available_apps || [];
                     const appStatus = event.data.app_status || 'unknown';
+                    const browserDomain = (event.data as any).browser_domain;
+                    const focusedAppWithDomain = (event.data as any).focused_app_with_domain;
                     
-                    // Include status in the action for better model understanding
-                    const appFocusAction = `app_focus(focused: "${focusedApp}", status: "${appStatus}", available: [${availableApps.join(', ')}])`;
+                    // Include browser domain info in the action for browser apps
+                    let appFocusAction = `app_focus(focused: "${focusedApp}", status: "${appStatus}", available: [${availableApps.join(', ')}])`;
+                    if (browserDomain) {
+                        appFocusAction = `app_focus(focused: "${focusedAppWithDomain || focusedApp}", domain: "${browserDomain}", status: "${appStatus}", available: [${availableApps.join(', ')}])`;
+                    }
 
                     console.log(`[FORMATTER-DEBUG] Processing app_focus event: ${appFocusAction}`);
 
@@ -204,7 +209,11 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
                             focused_app: event.data.focused_app,
                             available_apps: event.data.available_apps,
                             app_status: event.data.app_status,
-                            all_windows: event.data.all_windows
+                            all_windows: event.data.all_windows,
+                            ...(browserDomain && { 
+                                browser_domain: browserDomain,
+                                focused_app_with_domain: focusedAppWithDomain
+                            })
                         }
                     });
                     break;

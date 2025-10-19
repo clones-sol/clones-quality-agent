@@ -1,5 +1,6 @@
 import { PipelineConfig, ProcessedEvent, SchemaVersion } from '../shared/types';
 import { visualizeEvents } from '../shared/utils/visualization';
+import { BrowserUrlExtractor } from '../stages/extraction/browser-url-extractor';
 
 import fs from 'node:fs';
 import path from 'path';
@@ -100,6 +101,15 @@ export class Pipeline {
         console.error(`Extractor stage failed:`, error);
         throw error;
       }
+    }
+
+    // Run browser URL extraction
+    try {
+      const browserUrlExtractor = new BrowserUrlExtractor();
+      allEvents = await browserUrlExtractor.process(allEvents);
+    } catch (error) {
+      console.error(`Browser URL extraction failed:`, error);
+      throw error;
     }
 
     // Then run augmenters on the combined events

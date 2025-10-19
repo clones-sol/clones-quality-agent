@@ -207,18 +207,30 @@ export class Grader {
         // Count app_focus events across all chunks
         let appFocusCount = 0;
         let detectedApps = new Set<string>();
+        let detectedDomains = new Set<string>();
         chunks.forEach((chunk) => {
             chunk.forEach((item) => {
                 if (item.type === 'app_focus') {
                     appFocusCount++;
                     const focusedApp = item.data?.focused_app;
+                    const browserDomain = (item.data as any)?.browser_domain;
+                    const focusedAppWithDomain = (item.data as any)?.focused_app_with_domain;
+                    
                     if (focusedApp && focusedApp !== 'Unknown') {
-                        detectedApps.add(focusedApp);
+                        // Use app with domain if available, otherwise just app name
+                        detectedApps.add(focusedAppWithDomain || focusedApp);
+                        
+                        // Track domains separately for webapp validation
+                        if (browserDomain) {
+                            detectedDomains.add(browserDomain);
+                        }
                     }
                 }
             });
         });
-        console.log(`[GRADER-DEBUG] Found ${appFocusCount} app_focus events, detected apps: [${Array.from(detectedApps).join(', ')}]`);
+        
+        const domainsInfo = detectedDomains.size > 0 ? `, detected domains: [${Array.from(detectedDomains).join(', ')}]` : '';
+        console.log(`[GRADER-DEBUG] Found ${appFocusCount} app_focus events, detected apps: [${Array.from(detectedApps).join(', ')}]${domainsInfo}`);
         const summaries: string[] = [];
         let prevSummary: string | null = null;
 
@@ -276,8 +288,10 @@ export class Grader {
             if (item.type === 'app_focus') {
                 chunkAppFocusCount++;
                 const focusedApp = item.data?.focused_app;
+                const focusedAppWithDomain = (item.data as any)?.focused_app_with_domain;
                 if (focusedApp && focusedApp !== 'Unknown') {
-                    chunkAppFocusApps.add(focusedApp);
+                    // Use app with domain if available for better tracking
+                    chunkAppFocusApps.add(focusedAppWithDomain || focusedApp);
                 }
             }
         });
@@ -323,8 +337,11 @@ export class Grader {
                 if (item.type === 'app_focus') {
                     totalAppFocusEvents++;
                     const focusedApp = item.data?.focused_app;
+                    const focusedAppWithDomain = (item.data as any)?.focused_app_with_domain;
                     if (focusedApp && focusedApp !== 'Unknown') {
-                        appFocusCounts.set(focusedApp, (appFocusCounts.get(focusedApp) || 0) + 1);
+                        // Use app with domain for statistics to track webapp usage
+                        const appKey = focusedAppWithDomain || focusedApp;
+                        appFocusCounts.set(appKey, (appFocusCounts.get(appKey) || 0) + 1);
                     }
                 }
             });
@@ -891,7 +908,8 @@ export class Grader {
             `\n📱 LAYER 1 - app_focus events (Application Context):` +
             `\n   • Purpose: Confirm WHICH application was active/launched` +
             `\n   • Example: app_focus(focused: "Word") = Word is the active application` +
-            `\n   • Usage: Use this to verify the CORRECT app was used (not wrong app)` +
+            `\n   • For browsers: app_focus(focused: "Chrome (google.com)", domain: "google.com")` +
+            `\n   • Usage: Use this to verify the CORRECT app AND domain were used` +
             `\n   • DO NOT use this alone to determine task completion` +
             `\n` +
             `\n🖼️ LAYER 2 - Screenshots (Visual Evidence):` +
@@ -966,7 +984,11 @@ export class Grader {
             `Application Usage Validation:\n` +
             `- Use app_focus events to confirm correct application usage\n` +
             `- If target app (${meta.quest?.app || 'specified app'}) appears in app_focus events, the app WAS used\n` +
-            `- If >70% of app_focus events show WRONG apps, significantly reduce outcome/process scores\n` +
+            `- For web browsers: Check the 'domain' field in app_focus events to validate correct website\n` +
+            `  * Example: app_focus(focused: "Chrome (google.com)", domain: "google.com")\n` +
+            `  * If task requires specific website/webapp, verify the domain matches\n` +
+            `  * Wrong domain = wrong webapp, penalize like wrong application\n` +
+            `- If >70% of app_focus events show WRONG apps/domains, significantly reduce outcome/process scores\n` +
             `- If 0 app_focus events for target app, cap outcome at 30 (wrong app or no app usage)\n` +
             `\n` +
             `Efficiency guidance:\n` +
@@ -1149,7 +1171,15 @@ export class Grader {
                 // Convert app_focus events to text for LLM consumption
                 const focusedApp = item.data?.focused_app || 'Unknown';
                 const availableApps = item.data?.available_apps || [];
-                const appFocusText = `app_focus(focused: "${focusedApp}", available: [${availableApps.join(', ')}])`;
+                const browserDomain = (item.data as any)?.browser_domain;
+                const focusedAppWithDomain = (item.data as any)?.focused_app_with_domain;
+                
+                // Include browser domain info for better webapp validation
+                let appFocusText = `app_focus(focused: "${focusedApp}", available: [${availableApps.join(', ')}])`;
+                if (browserDomain) {
+                    appFocusText = `app_focus(focused: "${focusedAppWithDomain || focusedApp}", domain: "${browserDomain}", available: [${availableApps.join(', ')}])`;
+                }
+                
                 const sanitizedText = sanitizeUserInput(appFocusText);
                 const text = this.truncate(sanitizedText, this.maxTextPerMessage);
                 if (text) {

@@ -20,7 +20,12 @@ jobs:
           bun-version: latest
 
       - name: Install Dependencies
-        run: bun install
+        run: |
+          bun install
+          bun install --include=optional sharp
+          bun install --os=darwin --cpu=arm64 sharp
+          bun install --os=win32 --cpu=x64 sharp
+          bun install --os=linux --cpu=x64 sharp
       - name: Build Clones Quality Agent for All Operating Systems
         run: bun run build
 

@@ -10,9 +10,9 @@
     "start": "bun run src/index.ts",
     "stats": "bun run scripts/stats.ts",
     "download": "bun run scripts/download.ts",
-    "build:windows": "bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile target/clones-quality-agent-win-x64.exe",
-    "build:macos": "bun build --compile --target=bun-macos-arm64 ./src/index.ts --outfile target/clones-quality-agent-macos-arm64",
-    "build:linux": "bun build --compile --target=bun-linux-x64 ./src/index.ts --outfile target/clones-quality-agent-linux-x64",
+    "build:windows": "bun build --compile --target=bun-windows-x64 --external sharp --external canvas ./src/index.ts --outfile target/clones-quality-agent-win-x64.exe",
+    "build:macos": "bun build --compile --target=bun-macos-arm64 --external sharp --external canvas ./src/index.ts --outfile target/clones-quality-agent-macos-arm64",
+    "build:linux": "bun build --compile --target=bun-linux-x64 --external sharp --external canvas ./src/index.ts --outfile target/clones-quality-agent-linux-x64",
     "build": "bun build:windows && bun build:macos && bun build:linux"
   },
   "author": "",

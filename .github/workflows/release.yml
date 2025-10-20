@@ -33,6 +33,44 @@ jobs:
       - name: Fix Build Permissions
         run: chmod -R +r target/
 
+      - name: Package binaries with dependencies
+        run: |
+          mkdir -p target/packaged
+          
+          # For each binary, create a package with node_modules
+          for binary in target/clones-quality-agent-*; do
+            if [ -f "$binary" ]; then
+              basename_file=$(basename "$binary")
+              package_dir="target/packaged/${basename_file}-package"
+              mkdir -p "$package_dir"
+              
+              # Copy binary
+              cp "$binary" "$package_dir/"
+              
+              # Copy only Sharp and Canvas node_modules for the specific platform
+              mkdir -p "$package_dir/node_modules"
+              if [[ "$basename_file" == *"macos"* ]]; then
+                cp -r node_modules/sharp "$package_dir/node_modules/" || true
+                cp -r node_modules/canvas "$package_dir/node_modules/" || true
+              elif [[ "$basename_file" == *"linux"* ]]; then
+                cp -r node_modules/sharp "$package_dir/node_modules/" || true
+                cp -r node_modules/canvas "$package_dir/node_modules/" || true
+              elif [[ "$basename_file" == *"win"* ]]; then
+                cp -r node_modules/sharp "$package_dir/node_modules/" || true
+                cp -r node_modules/canvas "$package_dir/node_modules/" || true
+              fi
+              
+              # Create archive
+              cd target/packaged
+              if [[ "$basename_file" == *"win"* ]]; then
+                zip -r "${basename_file}-package.zip" "${basename_file}-package/"
+              else
+                tar -czf "${basename_file}-package.tar.gz" "${basename_file}-package/"
+              fi
+              cd ../..
+            fi
+          done
+
       - name: Install AWS CLI
         run: |
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"

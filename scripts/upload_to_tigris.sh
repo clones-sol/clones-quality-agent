@@ -94,6 +94,26 @@ upload_binaries() {
     
     log_info "Uploading binaries from: $target_dir"
     
+    # Upload packaged binaries first (with dependencies)
+    local packaged_dir="$target_dir/packaged"
+    if [ -d "$packaged_dir" ]; then
+        for package_file in "$packaged_dir"/*.{tar.gz,zip}; do
+            if [ -f "$package_file" ]; then
+                local file_name=$(basename "$package_file")
+                local platform="unknown"
+                if [[ "$file_name" =~ linux ]]; then
+                    platform="linux"
+                elif [[ "$file_name" =~ macos ]]; then
+                    platform="macos"
+                elif [[ "$file_name" =~ win ]]; then
+                    platform="windows"
+                fi
+                
+                upload_file "$package_file" "cqa/$file_name" "$version" "$platform"
+            fi
+        done
+    fi
+    
     # Upload each binary file directly from target directory
     for binary_file in "$target_dir"/*; do
         if [ -f "$binary_file" ] && [[ ! "$binary_file" =~ \.(json|md|txt)$ ]]; then

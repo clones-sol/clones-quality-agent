@@ -10,6 +10,18 @@ on:
     branches: [main]
 
 jobs:
+  cleanup-old-artifacts:
+    name: Cleanup Old Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: 'artifact*'
+          useGlob: true
+          failOnError: false
+          # Delete artifacts older than current run to free storage space
+
   build:
     name: Build
     runs-on: ubuntu-latest

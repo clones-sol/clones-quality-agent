@@ -53,17 +53,28 @@ jobs:
               fi
               cp "$binary" "$package_dir/$versioned_binary_name"
               
-              # Copy only Sharp and Canvas node_modules for the specific platform
+              # Copy Sharp and Canvas with their dependencies for the specific platform
               mkdir -p "$package_dir/node_modules"
-              if [[ "$basename_file" == *"macos"* ]]; then
-                cp -r node_modules/sharp "$package_dir/node_modules/" || true
-                cp -r node_modules/canvas "$package_dir/node_modules/" || true
-              elif [[ "$basename_file" == *"linux"* ]]; then
-                cp -r node_modules/sharp "$package_dir/node_modules/" || true
-                cp -r node_modules/canvas "$package_dir/node_modules/" || true
-              elif [[ "$basename_file" == *"win"* ]]; then
-                cp -r node_modules/sharp "$package_dir/node_modules/" || true
-                cp -r node_modules/canvas "$package_dir/node_modules/" || true
+              if [[ "$basename_file" == *"macos"* ]] || [[ "$basename_file" == *"linux"* ]] || [[ "$basename_file" == *"win"* ]]; then
+                echo "Copying Sharp and its dependencies..."
+                
+                # Core Sharp dependencies
+                for dep in sharp detect-libc semver @img; do
+                  if [ -d "node_modules/$dep" ]; then
+                    echo "Copying $dep..."
+                    cp -r "node_modules/$dep" "$package_dir/node_modules/" || true
+                  fi
+                done
+                
+                # Canvas and its potential dependencies if available
+                for dep in canvas; do
+                  if [ -d "node_modules/$dep" ]; then
+                    echo "Copying $dep..."
+                    cp -r "node_modules/$dep" "$package_dir/node_modules/" || true
+                  fi
+                done
+                
+                echo "Package dependencies copied successfully"
               fi
               
               # Create archive (go into the package directory to avoid nested structure)

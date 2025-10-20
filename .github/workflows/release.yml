@@ -10,20 +10,8 @@ on:
     branches: [main]
 
 jobs:
-  cleanup-old-artifacts:
-    name: Cleanup Old Artifacts
-    runs-on: ubuntu-latest
-    steps:
-      - name: Delete old artifacts
-        uses: geekyeggo/delete-artifact@v5
-        with:
-          name: 'artifact*'
-          useGlob: true
-          failOnError: false
-          # Delete artifacts older than current run to free storage space
-
-  build:
-    name: Build
+  build-and-upload:
+    name: Build and Upload to Tigris
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,36 +26,12 @@ jobs:
           bun install --os=darwin --cpu=arm64 sharp
           bun install --os=win32 --cpu=x64 sharp
           bun install --os=linux --cpu=x64 sharp
+
       - name: Build Clones Quality Agent for All Operating Systems
         run: bun run build
 
-      - name: Fix Artifact Permissions
+      - name: Fix Build Permissions
         run: chmod -R +r target/
-
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: target/
-          compression-level: 0
-
-  upload-to-tigris:
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Display structure of downloaded files
-        run: ls -R artifacts/
-
-      - name: Prepare target directory
-        run: |
-          mkdir -p target
-          cp -r artifacts/artifact/* target/
 
       - name: Install AWS CLI
         run: |
@@ -78,15 +42,13 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Make script executable and upload to Tigris
+      - name: Upload directly to Tigris
         run: |
           # Convert Windows line endings to Unix
           sed -i 's/\r$//' scripts/upload_to_tigris.sh
           chmod +x scripts/upload_to_tigris.sh
           echo "=== Debug: target directory structure ==="
           ls -la target/
-          echo "=== Debug: artifacts directory structure ==="
-          ls -la artifacts/
           bash scripts/upload_to_tigris.sh
         env:
           TIGRIS_ACCESS_KEY_ID: ${{ secrets.TIGRIS_ACCESS_KEY_ID }}

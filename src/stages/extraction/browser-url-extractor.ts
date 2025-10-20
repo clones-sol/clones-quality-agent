@@ -3,10 +3,20 @@ import OpenAI from 'openai';
 import sharp from 'sharp';
 
 export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], ProcessedEvent[]> {
-  private openai: OpenAI;
+  private openai?: OpenAI;
 
   constructor() {
-    this.openai = new OpenAI();
+    // Initialize OpenAI lazily to avoid errors if API key is not available
+  }
+
+  private getOpenAI(): OpenAI {
+    if (!this.openai) {
+      if (!process.env.OPENAI_API_KEY) {
+        throw new Error('OPENAI_API_KEY environment variable is required for browser URL extraction');
+      }
+      this.openai = new OpenAI();
+    }
+    return this.openai;
   }
 
   private isBrowserApp(appName: string): boolean {
@@ -48,7 +58,7 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
     const prompt = `Analyze this screenshot and detect the browser address bar region. Return JSON with bounding box: {"x": X, "y": Y, "width": W, "height": H}. If no browser address bar visible, return null.`;
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await this.getOpenAI().chat.completions.create({
         model: 'gpt-4o',
         messages: [{
           role: 'user',
@@ -172,7 +182,7 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
     const prompt = `Extract the URL from this browser address bar. Return only the domain (e.g. "github.com", "google.com"). If no URL visible, return "unknown".`;
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await this.getOpenAI().chat.completions.create({
         model: 'gpt-4o',
         messages: [{
           role: 'user',

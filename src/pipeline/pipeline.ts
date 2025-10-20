@@ -103,13 +103,18 @@ export class Pipeline {
       }
     }
 
-    // Run browser URL extraction
-    try {
-      const browserUrlExtractor = new BrowserUrlExtractor();
-      allEvents = await browserUrlExtractor.process(allEvents);
-    } catch (error) {
-      console.error(`Browser URL extraction failed:`, error);
-      throw error;
+    // Run browser URL extraction (only if OpenAI API key is available)
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        const browserUrlExtractor = new BrowserUrlExtractor();
+        allEvents = await browserUrlExtractor.process(allEvents);
+      } catch (error) {
+        console.error(`Browser URL extraction failed:`, error);
+        // Don't throw error, just log it and continue without browser URL extraction
+        console.warn('Continuing without browser URL extraction...');
+      }
+    } else {
+      console.log('[Pipeline] Skipping browser URL extraction (OPENAI_API_KEY not set)');
     }
 
     // Then run augmenters on the combined events

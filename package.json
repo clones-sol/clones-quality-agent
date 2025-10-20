@@ -1,6 +1,6 @@
 {
   "name": "clones-quality-agent",
-  "version": "2.0.22",
+  "version": "2.0.23",
   "scripts": {
     "test": "bun test",
     "test:grading": "bun run scripts/test-grading.ts",
@@ -24,7 +24,7 @@
     "mongodb": "^6.19.0",
     "ndjson": "^2.0.0",
     "openai": "^5.20.1",
-    "sharp": "^0.34.3",
+    "sharp": "^0.34.4",
     "tesseract.js": "^6.0.1",
     "tiktoken": "^1.0.22",
     "zod": "^3.23.8"

@@ -109,7 +109,19 @@ upload_binaries() {
                     platform="windows"
                 fi
                 
-                upload_file "$package_file" "cqa/$file_name" "$version" "$platform"
+                # Add version to package filename
+                local base_name="${file_name%.*.*}"  # Remove .tar.gz or .zip
+                local extension
+                if [[ "$file_name" == *.tar.gz ]]; then
+                    extension=".tar.gz"
+                elif [[ "$file_name" == *.zip ]]; then
+                    extension=".zip"
+                else
+                    extension=""
+                fi
+                local versioned_package_name="${base_name}-v${version}${extension}"
+                
+                upload_file "$package_file" "cqa/$versioned_package_name" "$version" "$platform"
             fi
         done
     fi

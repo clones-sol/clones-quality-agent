@@ -66,14 +66,14 @@ jobs:
                 cp -r node_modules/canvas "$package_dir/node_modules/" || true
               fi
               
-              # Create archive
-              cd target/packaged
+              # Create archive (go into the package directory to avoid nested structure)
+              cd "target/packaged/${basename_file}-package"
               if [[ "$basename_file" == *"win"* ]]; then
-                zip -r "${basename_file}-package.zip" "${basename_file}-package/"
+                zip -r "../${basename_file}-package.zip" .
               else
-                tar -czf "${basename_file}-package.tar.gz" "${basename_file}-package/"
+                tar -czf "../${basename_file}-package.tar.gz" .
               fi
-              cd ../..
+              cd ../../..
             fi
           done
 

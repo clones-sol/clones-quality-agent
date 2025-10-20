@@ -44,8 +44,14 @@ jobs:
               package_dir="target/packaged/${basename_file}-package"
               mkdir -p "$package_dir"
               
-              # Copy binary
-              cp "$binary" "$package_dir/"
+              # Copy binary with versioned name
+              version=$(jq -r .version package.json)
+              if [[ "$basename_file" == *"win"* ]]; then
+                versioned_binary_name="${basename_file}-v${version}.exe"
+              else
+                versioned_binary_name="${basename_file}-v${version}"
+              fi
+              cp "$binary" "$package_dir/$versioned_binary_name"
               
               # Copy only Sharp and Canvas node_modules for the specific platform
               mkdir -p "$package_dir/node_modules"

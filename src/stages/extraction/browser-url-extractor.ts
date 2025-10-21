@@ -106,11 +106,20 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
   }
 
   private async extractUrlMultiZone(frameBase64: string): Promise<string | null> {
-    const zones = [
+    // Adaptive zones based on platform and display characteristics
+    const baseZones = [
       { name: 'top15', x: 0, y: 0, widthRatio: 1, heightRatio: 0.15 },
       { name: 'top25', x: 0, y: 0, widthRatio: 1, heightRatio: 0.25 },
       { name: 'center-top', x: 0.1, y: 0.05, widthRatio: 0.8, heightRatio: 0.15 }
     ];
+    
+    // Linux high-DPI adaptations - adjust zones for better address bar detection
+    const zones = this.isLinux ? [
+      { name: 'linux-top8', x: 0, y: 0, widthRatio: 1, heightRatio: 0.08 },
+      { name: 'linux-top12', x: 0, y: 0, widthRatio: 1, heightRatio: 0.12 },
+      { name: 'linux-center-wide', x: 0.05, y: 0.02, widthRatio: 0.9, heightRatio: 0.1 },
+      { name: 'linux-address-bar', x: 0.2, y: 0.03, widthRatio: 0.6, heightRatio: 0.06 }
+    ] : baseZones;
 
     const base64Data = frameBase64.replace(/^data:image\/\w+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
@@ -146,8 +155,19 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
           height: Math.max(30, cropH) 
         };
         
+        // Linux-specific adjustments for high-DPI displays
         if (this.isLinux) {
-          console.log(`[BrowserUrlExtractor] Linux ${zone.name} extract: left=${extractOptions.left}, top=${extractOptions.top}, width=${extractOptions.width}, height=${extractOptions.height}`);
+          // Ensure minimum viable dimensions for address bar detection
+          extractOptions.width = Math.max(200, extractOptions.width);
+          extractOptions.height = Math.max(40, extractOptions.height);
+          
+          // Adjust for high-DPI: if image is very large, ensure we capture enough detail
+          if (width && width > 2000) {
+            extractOptions.width = Math.min(extractOptions.width, Math.floor(width * 0.8));
+            extractOptions.height = Math.min(extractOptions.height, Math.floor(height * 0.08));
+          }
+          
+          console.log(`[BrowserUrlExtractor] Linux ${zone.name} extract (adjusted): left=${extractOptions.left}, top=${extractOptions.top}, width=${extractOptions.width}, height=${extractOptions.height}`);
         }
 
         let croppedBuffer;
@@ -284,7 +304,14 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
   }
 
   private async extractUrlFromCrop(croppedImage: string): Promise<string | null> {
-    const prompt = `Extract the URL from this browser address bar. Return only the domain (e.g. "github.com", "google.com"). If no URL visible, return "unknown".`;
+    const prompt = `Look at this browser address bar screenshot. Extract ONLY the domain from the URL.
+
+RULES:
+- Return ONLY the domain (e.g. "github.com", "google.com", "anthropic.com")
+- NO explanations, NO "unknown", NO sentences
+- If you see any URL, extract the domain part
+- If no clear URL is visible, return null
+- Examples of correct responses: "google.com", "github.com", "stackoverflow.com"`;
 
     try {
       const response = await this.getOpenAI().chat.completions.create({
@@ -296,12 +323,27 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
             { type: 'image_url', image_url: { url: croppedImage.startsWith('data:') ? croppedImage : `data:image/jpeg;base64,${croppedImage}` } }
           ]
         }],
-        max_tokens: 50,
-        temperature: 0.1
+        max_tokens: 20,
+        temperature: 0.0
       });
 
       const result = response.choices[0].message.content?.trim().toLowerCase();
-      return result && result !== 'unknown' ? result : null;
+      
+      // Filter out non-domain responses
+      if (!result || 
+          result === 'unknown' || 
+          result === 'null' ||
+          result.includes('unable') ||
+          result.includes('cannot') ||
+          result.includes('no') ||
+          result.length > 50 ||
+          !result.includes('.')) {
+        return null;
+      }
+      
+      // Extract just the domain if there's extra text
+      const domainMatch = result.match(/([a-z0-9-]+\.)+[a-z]{2,}/);
+      return domainMatch ? domainMatch[0] : null;
     } catch (error) {
       console.error('[BrowserUrlExtractor] URL extraction failed:', error);
       return null;

@@ -303,6 +303,64 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
     return null;
   }
 
+  private async extractUrlFromFullImage(frameBase64: string): Promise<string | null> {
+    const prompt = `Look at this browser screenshot. Find the address bar and extract ONLY the domain from the URL.
+
+RULES:
+- Return ONLY the domain (e.g. "github.com", "google.com", "anthropic.com")  
+- NO explanations, NO "unknown", NO sentences
+- Look for the address/URL bar at the top of the browser
+- If you see any URL in the address bar, extract just the domain part
+- If no clear URL is visible in the address bar, return null
+- Examples: "google.com", "github.com", "stackoverflow.com"`;
+
+    try {
+      const response = await this.getOpenAI().chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: frameBase64.startsWith('data:') ? frameBase64 : `data:image/jpeg;base64,${frameBase64}` } }
+          ]
+        }],
+        max_tokens: 20,
+        temperature: 0.0
+      });
+
+      const result = response.choices[0].message.content?.trim().toLowerCase();
+      
+      if (this.isLinux) {
+        console.log(`[BrowserUrlExtractor] Linux full image OCR result: "${result}"`);
+      }
+      
+      // Filter out non-domain responses
+      if (!result || 
+          result === 'unknown' || 
+          result === 'null' ||
+          result.includes('unable') ||
+          result.includes('cannot') ||
+          result.includes('no') ||
+          result.length > 50 ||
+          !result.includes('.')) {
+        return null;
+      }
+      
+      // Extract just the domain if there's extra text
+      const domainMatch = result.match(/([a-z0-9-]+\.)+[a-z]{2,}/);
+      const domain = domainMatch ? domainMatch[0] : null;
+      
+      if (domain && this.isLinux) {
+        console.log(`[BrowserUrlExtractor] Linux full image OCR extracted domain: "${domain}"`);
+      }
+      
+      return domain;
+    } catch (error) {
+      console.error(`[BrowserUrlExtractor] Full image URL extraction failed on ${this.platform}:`, error);
+      return null;
+    }
+  }
+
   private async extractUrlFromCrop(croppedImage: string): Promise<string | null> {
     const prompt = `Look at this browser address bar screenshot. Extract ONLY the domain from the URL.
 
@@ -329,21 +387,36 @@ RULES:
 
       const result = response.choices[0].message.content?.trim().toLowerCase();
       
-      // Filter out non-domain responses
+      if (this.isLinux) {
+        console.log(`[BrowserUrlExtractor] Linux crop OCR raw result: "${result}"`);
+      }
+      
+      // Filter out non-domain responses - including the specific message you're seeing
       if (!result || 
           result === 'unknown' || 
           result === 'null' ||
           result.includes('unable') ||
           result.includes('cannot') ||
           result.includes('no') ||
+          result.includes('therefore') ||
+          result.includes('extract any url') ||
           result.length > 50 ||
           !result.includes('.')) {
+        if (this.isLinux) {
+          console.log(`[BrowserUrlExtractor] Linux crop OCR filtered out: "${result}"`);
+        }
         return null;
       }
       
       // Extract just the domain if there's extra text
       const domainMatch = result.match(/([a-z0-9-]+\.)+[a-z]{2,}/);
-      return domainMatch ? domainMatch[0] : null;
+      const domain = domainMatch ? domainMatch[0] : null;
+      
+      if (this.isLinux) {
+        console.log(`[BrowserUrlExtractor] Linux crop OCR final domain: "${domain}"`);
+      }
+      
+      return domain;
     } catch (error) {
       console.error('[BrowserUrlExtractor] URL extraction failed:', error);
       return null;
@@ -370,9 +443,15 @@ RULES:
         try {
           let domain: string | null = null;
 
-          const croppedImage = await this.cropAddressBar(frameEvent.data.frame, focusEvent);
-          if (croppedImage) {
-            domain = await this.extractUrlFromCrop(croppedImage);
+          // Try full image OCR first (more reliable than cropping)
+          domain = await this.extractUrlFromFullImage(frameEvent.data.frame);
+
+          // Fallback to cropping methods if full image fails
+          if (!domain) {
+            const croppedImage = await this.cropAddressBar(frameEvent.data.frame, focusEvent);
+            if (croppedImage) {
+              domain = await this.extractUrlFromCrop(croppedImage);
+            }
           }
 
           if (!domain) {
@@ -384,6 +463,7 @@ RULES:
             (focusEvent.data as any).focused_app_with_domain = `${focusEvent.data.focused_app} (${domain})`;
             console.log(`[BrowserUrlExtractor] ✅ ${focusEvent.data.focused_app} -> ${domain} [${this.platform}]`);
           } else {
+            // Don't add parentheses if no domain found - keep original app name clean
             console.log(`[BrowserUrlExtractor] ❌ No domain found for ${focusEvent.data.focused_app} [${this.platform}]`);
           }
         } catch (error) {

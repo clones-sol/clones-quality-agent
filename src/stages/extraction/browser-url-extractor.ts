@@ -142,33 +142,41 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
     const { width, height } = metadata;
 
     for (const zone of zones) {
-      try {
-        const cropX = Math.floor((width || 1920) * zone.x);
-        const cropY = Math.floor((height || 1080) * zone.y);
-        const cropW = Math.floor((width || 1920) * zone.widthRatio);
-        const cropH = Math.floor((height || 1080) * zone.heightRatio);
+      // Calculate and validate dimensions outside try-catch for fallback access
+      const cropX = Math.floor((width || 1920) * zone.x);
+      const cropY = Math.floor((height || 1080) * zone.y);
+      const cropW = Math.floor((width || 1920) * zone.widthRatio);
+      const cropH = Math.floor((height || 1080) * zone.heightRatio);
 
-        const extractOptions = { 
-          left: Math.max(0, cropX), 
-          top: Math.max(0, cropY), 
-          width: Math.max(100, cropW), 
-          height: Math.max(30, cropH) 
-        };
+      let extractOptions = { 
+        left: Math.max(0, cropX), 
+        top: Math.max(0, cropY), 
+        width: Math.max(100, cropW), 
+        height: Math.max(30, cropH) 
+      };
+      
+      // Linux-specific adjustments for high-DPI displays
+      if (this.isLinux) {
+        // Ensure minimum viable dimensions for address bar detection
+        extractOptions.width = Math.max(200, extractOptions.width);
+        extractOptions.height = Math.max(40, extractOptions.height);
         
-        // Linux-specific adjustments for high-DPI displays
-        if (this.isLinux) {
-          // Ensure minimum viable dimensions for address bar detection
-          extractOptions.width = Math.max(200, extractOptions.width);
-          extractOptions.height = Math.max(40, extractOptions.height);
-          
-          // Adjust for high-DPI: if image is very large, ensure we capture enough detail
-          if (width && width > 2000) {
-            extractOptions.width = Math.min(extractOptions.width, Math.floor(width * 0.8));
-            extractOptions.height = Math.min(extractOptions.height, Math.floor(height * 0.08));
-          }
-          
-          console.log(`[BrowserUrlExtractor] Linux ${zone.name} extract (adjusted): left=${extractOptions.left}, top=${extractOptions.top}, width=${extractOptions.width}, height=${extractOptions.height}`);
+        // Adjust for high-DPI: if image is very large, ensure we capture enough detail
+        if (width && width > 2000) {
+          extractOptions.width = Math.min(extractOptions.width, Math.floor(width * 0.8));
+          extractOptions.height = Math.min(extractOptions.height, Math.floor(height * 0.08));
         }
+        
+        console.log(`[BrowserUrlExtractor] Linux ${zone.name} extract (adjusted): left=${extractOptions.left}, top=${extractOptions.top}, width=${extractOptions.width}, height=${extractOptions.height}`);
+      }
+      
+      // Skip zone if dimensions are invalid
+      if (extractOptions.width <= 0 || extractOptions.height <= 0) {
+        console.warn(`[BrowserUrlExtractor] Skipping ${zone.name} - invalid dimensions: ${extractOptions.width}x${extractOptions.height}`);
+        continue;
+      }
+
+      try {
 
         let croppedBuffer;
         if (this.isLinux) {
@@ -201,9 +209,15 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
             const fallbackOptions = {
               left: Math.max(0, Math.floor(extractOptions.left / 2)),
               top: Math.max(0, Math.floor(extractOptions.top / 2)),
-              width: Math.min(extractOptions.width, 800),
-              height: Math.min(extractOptions.height, 200)
+              width: Math.max(100, Math.min(extractOptions.width, 800)),
+              height: Math.max(50, Math.min(extractOptions.height, 200))
             };
+            
+            // Validate fallback dimensions
+            if (fallbackOptions.width <= 0 || fallbackOptions.height <= 0) {
+              console.warn(`[BrowserUrlExtractor] Fallback dimensions invalid for ${zone.name}: ${fallbackOptions.width}x${fallbackOptions.height}`);
+              continue;
+            }
             
             const fallbackBuffer = await sharp(imageBuffer, { limitInputPixels: false, sequentialRead: true })
               .extract(fallbackOptions)

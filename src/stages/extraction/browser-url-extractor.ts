@@ -1,12 +1,30 @@
 import { ProcessedEvent, PipelineStage } from '../../shared/types';
 import OpenAI from 'openai';
 import sharp from 'sharp';
+import os from 'os';
 
 export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], ProcessedEvent[]> {
   private openai?: OpenAI;
+  private isLinux: boolean;
+  private platform: string;
 
   constructor() {
     // Initialize OpenAI lazily to avoid errors if API key is not available
+    this.platform = os.platform();
+    this.isLinux = this.platform === 'linux';
+    
+    // Configure Sharp for Linux glibc memory issues
+    if (this.isLinux) {
+      try {
+        sharp.concurrency(1); // Reduce concurrency on Linux to avoid memory fragmentation
+        sharp.cache({ memory: 50 }); // Limit cache to 50MB on Linux
+        console.log('[BrowserUrlExtractor] Linux detected: Sharp configured with limited concurrency and cache');
+      } catch (error) {
+        console.warn('[BrowserUrlExtractor] Failed to configure Sharp for Linux:', error);
+      }
+    }
+    
+    console.log(`[BrowserUrlExtractor] Platform: ${this.platform}, Linux optimizations: ${this.isLinux}`);
   }
 
   private getOpenAI(): OpenAI {
@@ -96,7 +114,23 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
 
     const base64Data = frameBase64.replace(/^data:image\/\w+;base64,/, '');
     const imageBuffer = Buffer.from(base64Data, 'base64');
-    const { width, height } = await sharp(imageBuffer).metadata();
+    
+    let sharpInstance;
+    let metadata;
+    
+    try {
+      sharpInstance = sharp(imageBuffer);
+      metadata = await sharpInstance.metadata();
+      
+      if (this.isLinux) {
+        console.log(`[BrowserUrlExtractor] Linux metadata: ${metadata.width}x${metadata.height}, format: ${metadata.format}, channels: ${metadata.channels}`);
+      }
+    } catch (error) {
+      console.error(`[BrowserUrlExtractor] Failed to process image metadata on ${this.platform}:`, error);
+      return null;
+    }
+    
+    const { width, height } = metadata;
 
     for (const zone of zones) {
       try {
@@ -105,15 +139,30 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
         const cropW = Math.floor((width || 1920) * zone.widthRatio);
         const cropH = Math.floor((height || 1080) * zone.heightRatio);
 
-        const croppedBuffer = await sharp(imageBuffer)
-          .extract({ 
-            left: Math.max(0, cropX), 
-            top: Math.max(0, cropY), 
-            width: Math.max(100, cropW), 
-            height: Math.max(30, cropH) 
-          })
-          .png()
-          .toBuffer();
+        const extractOptions = { 
+          left: Math.max(0, cropX), 
+          top: Math.max(0, cropY), 
+          width: Math.max(100, cropW), 
+          height: Math.max(30, cropH) 
+        };
+        
+        if (this.isLinux) {
+          console.log(`[BrowserUrlExtractor] Linux ${zone.name} extract: left=${extractOptions.left}, top=${extractOptions.top}, width=${extractOptions.width}, height=${extractOptions.height}`);
+        }
+
+        let croppedBuffer;
+        if (this.isLinux) {
+          // Create new Sharp instance for each operation on Linux to avoid memory issues
+          croppedBuffer = await sharp(imageBuffer, { limitInputPixels: false })
+            .extract(extractOptions)
+            .png({ compressionLevel: 6, adaptiveFiltering: false })
+            .toBuffer();
+        } else {
+          croppedBuffer = await sharp(imageBuffer)
+            .extract(extractOptions)
+            .png()
+            .toBuffer();
+        }
 
         const croppedImage = `data:image/png;base64,${croppedBuffer.toString('base64')}`;
         const url = await this.extractUrlFromCrop(croppedImage);
@@ -123,7 +172,35 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
           return url;
         }
       } catch (error) {
-        console.warn(`[BrowserUrlExtractor] Zone ${zone.name} failed:`, error);
+        console.warn(`[BrowserUrlExtractor] Zone ${zone.name} failed on ${this.platform}:`, error);
+        
+        // On Linux, try with reduced parameters if extraction fails
+        if (this.isLinux && error instanceof Error && error.message.includes('extract')) {
+          try {
+            console.log(`[BrowserUrlExtractor] Attempting Linux fallback for zone ${zone.name}`);
+            const fallbackOptions = {
+              left: Math.max(0, Math.floor(extractOptions.left / 2)),
+              top: Math.max(0, Math.floor(extractOptions.top / 2)),
+              width: Math.min(extractOptions.width, 800),
+              height: Math.min(extractOptions.height, 200)
+            };
+            
+            const fallbackBuffer = await sharp(imageBuffer, { limitInputPixels: false, sequentialRead: true })
+              .extract(fallbackOptions)
+              .png({ compressionLevel: 9, adaptiveFiltering: false, palette: true })
+              .toBuffer();
+              
+            const fallbackImage = `data:image/png;base64,${fallbackBuffer.toString('base64')}`;
+            const fallbackUrl = await this.extractUrlFromCrop(fallbackImage);
+            
+            if (fallbackUrl && fallbackUrl !== 'unknown') {
+              console.log(`[BrowserUrlExtractor] Linux fallback success for ${zone.name}: ${fallbackUrl}`);
+              return fallbackUrl;
+            }
+          } catch (fallbackError) {
+            console.warn(`[BrowserUrlExtractor] Linux fallback also failed for ${zone.name}:`, fallbackError);
+          }
+        }
       }
     }
 
@@ -139,39 +216,67 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
     if (windowBounds && windowBounds.width > 0 && windowBounds.height > 0) {
       try {
         const addressBarHeight = Math.max(30, Math.min(80, windowBounds.height * 0.1));
+        
+        const extractOptions = {
+          left: Math.max(0, windowBounds.x),
+          top: Math.max(0, windowBounds.y + 20),
+          width: Math.max(100, windowBounds.width),
+          height: Math.max(30, addressBarHeight)
+        };
+        
+        if (this.isLinux) {
+          console.log(`[BrowserUrlExtractor] Linux window bounds crop: left=${extractOptions.left}, top=${extractOptions.top}, width=${extractOptions.width}, height=${extractOptions.height}`);
+        }
 
-        const croppedBuffer = await sharp(imageBuffer)
-          .extract({
-            left: Math.max(0, windowBounds.x),
-            top: Math.max(0, windowBounds.y + 20),
-            width: Math.max(100, windowBounds.width),
-            height: Math.max(30, addressBarHeight)
-          })
-          .png()
-          .toBuffer();
+        let croppedBuffer;
+        if (this.isLinux) {
+          croppedBuffer = await sharp(imageBuffer, { limitInputPixels: false })
+            .extract(extractOptions)
+            .png({ compressionLevel: 6, adaptiveFiltering: false })
+            .toBuffer();
+        } else {
+          croppedBuffer = await sharp(imageBuffer)
+            .extract(extractOptions)
+            .png()
+            .toBuffer();
+        }
 
         return `data:image/png;base64,${croppedBuffer.toString('base64')}`;
       } catch (error) {
-        console.warn('[BrowserUrlExtractor] Window bounds crop failed:', error);
+        console.warn(`[BrowserUrlExtractor] Window bounds crop failed on ${this.platform}:`, error);
       }
     }
 
     const region = await this.detectAddressBarRegion(frameBase64);
     if (region && region.width > 0 && region.height > 0) {
       try {
-        const croppedBuffer = await sharp(imageBuffer)
-          .extract({
-            left: Math.max(0, region.x),
-            top: Math.max(0, region.y),
-            width: Math.max(100, region.width),
-            height: Math.max(30, region.height)
-          })
-          .png()
-          .toBuffer();
+        const extractOptions = {
+          left: Math.max(0, region.x),
+          top: Math.max(0, region.y),
+          width: Math.max(100, region.width),
+          height: Math.max(30, region.height)
+        };
+        
+        if (this.isLinux) {
+          console.log(`[BrowserUrlExtractor] Linux smart crop: left=${extractOptions.left}, top=${extractOptions.top}, width=${extractOptions.width}, height=${extractOptions.height}`);
+        }
+
+        let croppedBuffer;
+        if (this.isLinux) {
+          croppedBuffer = await sharp(imageBuffer, { limitInputPixels: false })
+            .extract(extractOptions)
+            .png({ compressionLevel: 6, adaptiveFiltering: false })
+            .toBuffer();
+        } else {
+          croppedBuffer = await sharp(imageBuffer)
+            .extract(extractOptions)
+            .png()
+            .toBuffer();
+        }
 
         return `data:image/png;base64,${croppedBuffer.toString('base64')}`;
       } catch (error) {
-        console.warn('[BrowserUrlExtractor] Smart crop failed:', error);
+        console.warn(`[BrowserUrlExtractor] Smart crop failed on ${this.platform}:`, error);
       }
     }
 
@@ -210,7 +315,7 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
       this.isBrowserApp(e.data.focused_app)
     );
 
-    console.log(`[BrowserUrlExtractor] Processing ${browserFocusEvents.length} browser focus events`);
+    console.log(`[BrowserUrlExtractor] Processing ${browserFocusEvents.length} browser focus events on ${this.platform}`);
 
     for (const focusEvent of browserFocusEvents) {
       const frameEvent = events.find(e =>
@@ -235,10 +340,20 @@ export class BrowserUrlExtractor implements PipelineStage<ProcessedEvent[], Proc
           if (domain) {
             (focusEvent.data as any).browser_domain = domain;
             (focusEvent.data as any).focused_app_with_domain = `${focusEvent.data.focused_app} (${domain})`;
-            console.log(`[BrowserUrlExtractor] ✅ ${focusEvent.data.focused_app} -> ${domain}`);
+            console.log(`[BrowserUrlExtractor] ✅ ${focusEvent.data.focused_app} -> ${domain} [${this.platform}]`);
+          } else {
+            console.log(`[BrowserUrlExtractor] ❌ No domain found for ${focusEvent.data.focused_app} [${this.platform}]`);
           }
         } catch (error) {
-          console.error('[BrowserUrlExtractor] Processing error:', error);
+          console.error(`[BrowserUrlExtractor] Processing error on ${this.platform}:`, error);
+          
+          // Additional error details for Linux debugging
+          if (this.isLinux && error instanceof Error) {
+            console.error(`[BrowserUrlExtractor] Linux-specific error details: ${error.name}, ${error.message}`);
+            if (error.stack) {
+              console.error(`[BrowserUrlExtractor] Linux stack trace:`, error.stack.split('\n').slice(0, 5).join('\n'));
+            }
+          }
         }
       }
     }

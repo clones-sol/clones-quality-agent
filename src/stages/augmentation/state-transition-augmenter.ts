@@ -118,7 +118,7 @@ Requirements:
             const eventsBetween = events.filter(e =>
                 e.timestamp > currentFrame.timestamp &&
                 e.timestamp < nextFrame.timestamp &&
-                ['mouseclick', 'type', 'mousedrag', 'hotkey'].includes(e.type)
+                ['mouseclick', 'doubleclick', 'type', 'mousedrag', 'hotkey'].includes(e.type)
             );
 
             if (eventsBetween.length > 0) {

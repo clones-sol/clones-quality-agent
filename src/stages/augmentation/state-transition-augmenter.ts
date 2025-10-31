@@ -17,6 +17,13 @@ export class StateTransitionAugmenter implements PipelineStage<ProcessedEvent[],
                     y: event.data.y,
                     timestamp: event.timestamp
                 };
+            case 'doubleclick':
+                return {
+                    type: 'double_click',
+                    x: event.data.x,
+                    y: event.data.y,
+                    timestamp: event.timestamp
+                };
             case 'type':
                 return {
                     type: 'keyboard',
@@ -91,25 +98,25 @@ Requirements:
 
     async process(events: ProcessedEvent[]): Promise<ProcessedEvent[]> {
         console.log('\n[StateTransitionAugmenter] Starting state transition analysis...');
-        
+
         // Get frame events
         const frameEvents = events.filter(e => e.type === 'frame');
         console.log(`[StateTransitionAugmenter] Found ${frameEvents.length} total frames`);
-        
+
         let transitionsGenerated = 0;
         let framesProcessed = 0;
-        
+
         // Find all potential transitions (frames with events between them)
-        const potentialTransitions: {current: ProcessedEvent, next: ProcessedEvent, events: ProcessedEvent[]}[] = [];
-        
+        const potentialTransitions: { current: ProcessedEvent, next: ProcessedEvent, events: ProcessedEvent[] }[] = [];
+
         for (let i = 0; i < frameEvents.length - 1; i++) {
             const currentFrame = frameEvents[i];
             const nextFrame = frameEvents[i + 1];
-            
+
             if (!currentFrame.data.frame || !nextFrame.data.frame) continue;
 
-            const eventsBetween = events.filter(e => 
-                e.timestamp > currentFrame.timestamp && 
+            const eventsBetween = events.filter(e =>
+                e.timestamp > currentFrame.timestamp &&
                 e.timestamp < nextFrame.timestamp &&
                 ['mouseclick', 'type', 'mousedrag', 'hotkey'].includes(e.type)
             );
@@ -126,12 +133,12 @@ Requirements:
         console.log(`[StateTransitionAugmenter] Found ${potentialTransitions.length} potential transitions`);
 
         // Randomly sample transitions
-        const indices = Array.from({length: potentialTransitions.length}, (_, i) => i);
+        const indices = Array.from({ length: potentialTransitions.length }, (_, i) => i);
         for (let i = indices.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [indices[i], indices[j]] = [indices[j], indices[i]];
         }
-        
+
         const samplesToProcess = indices
             .slice(0, Math.min(this.maxSamples, potentialTransitions.length))
             .map(i => potentialTransitions[i]);
@@ -139,9 +146,9 @@ Requirements:
         console.log(`[StateTransitionAugmenter] Selected ${samplesToProcess.length} transitions to process`);
 
         // Process selected transitions
-        for (const {current, next, events: eventsBetween} of samplesToProcess) {
+        for (const { current, next, events: eventsBetween } of samplesToProcess) {
             framesProcessed++;
-            
+
             try {
                 console.log(`[StateTransitionAugmenter] Processing transition ${framesProcessed}/${samplesToProcess.length}`);
                 const description = await this.generateTransitionDescription(
@@ -149,7 +156,7 @@ Requirements:
                     next.data.frame!,
                     eventsBetween
                 );
-                    console.log(`[StateTransitionAugmenter] Generated description (${description.length} chars)`);
+                console.log(`[StateTransitionAugmenter] Generated description (${description.length} chars)`);
 
                 events.push({
                     type: 'state_transition',

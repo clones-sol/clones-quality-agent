@@ -135,6 +135,102 @@ describe('Keyboard Layout Support', () => {
   });
 });
 
+describe('Double Click Detection (DemoDesktopExtractor)', () => {
+  const DATA_DIR = path.join(process.cwd(), 'data', 'tests', 'extraction');
+
+  test('should emit a doubleclick when two clicks are close in time and space', async () => {
+    const testDir = path.join(DATA_DIR, 'doubleclick_test_' + Date.now());
+    await fs.mkdir(testDir, { recursive: true });
+
+    // Two rapid clicks at same position
+    const events = [
+      { event: 'mousemove', data: { x: 100, y: 100 }, time: 1000 },
+      { event: 'mousedown', data: { button: 'Left' }, time: 1010 },
+      { event: 'mouseup', data: { button: 'Left' }, time: 1040 },
+      // second click within 400ms and 0px distance
+      { event: 'mousedown', data: { button: 'Left' }, time: 1200 },
+      { event: 'mouseup', data: { button: 'Left' }, time: 1230 },
+    ];
+
+    const jsonlPath = path.join(testDir, 'input_log.jsonl');
+    await fs.writeFile(jsonlPath, events.map(e => JSON.stringify(e)).join('\n'));
+
+    const extractor = new DemoDesktopExtractor(DATA_DIR);
+    const sessionId = path.basename(testDir);
+    const processed = await extractor.process(sessionId);
+
+    const doubles = processed.filter(e => e.type === 'doubleclick');
+    const singles = processed.filter(e => e.type === 'mouseclick');
+
+    expect(doubles.length).toBe(1);
+    expect(singles.length).toBe(0);
+
+    await fs.rm(testDir, { recursive: true, force: true });
+  });
+
+  test('should emit two mouseclicks when clicks exceed double-click interval', async () => {
+    const testDir = path.join(DATA_DIR, 'singleclicks_test_' + Date.now());
+    await fs.mkdir(testDir, { recursive: true });
+
+    // Two clicks spaced beyond default 400ms double-click interval
+    const events = [
+      { event: 'mousemove', data: { x: 200, y: 200 }, time: 2000 },
+      { event: 'mousedown', data: { button: 'Left' }, time: 2010 },
+      { event: 'mouseup', data: { button: 'Left' }, time: 2040 },
+      // wait > 600ms, still at same position (distance 0)
+      { event: 'mousedown', data: { button: 'Left' }, time: 2700 },
+      { event: 'mouseup', data: { button: 'Left' }, time: 2730 },
+    ];
+
+    const jsonlPath = path.join(testDir, 'input_log.jsonl');
+    await fs.writeFile(jsonlPath, events.map(e => JSON.stringify(e)).join('\n'));
+
+    const extractor = new DemoDesktopExtractor(DATA_DIR);
+    const sessionId = path.basename(testDir);
+    const processed = await extractor.process(sessionId);
+
+    const doubles = processed.filter(e => e.type === 'doubleclick');
+    const singles = processed.filter(e => e.type === 'mouseclick');
+
+    expect(doubles.length).toBe(0);
+    expect(singles.length).toBe(2);
+
+    await fs.rm(testDir, { recursive: true, force: true });
+  });
+});
+
+describe('Report double-clicks from test-data/extract-test/input_log.jsonl', () => {
+  const DATA_DIR = path.join(process.cwd(), 'test-data');
+  const SESSION_ID = 'extract-test';
+
+  test(
+    'should list all doubleclick timestamps and coordinates',
+    async () => {
+      const extractor = new DemoDesktopExtractor(DATA_DIR);
+      const events = await extractor.process(SESSION_ID);
+
+      const doubles = events
+        .filter(e => e.type === 'doubleclick')
+        .map(e => ({ timestamp: e.timestamp, x: e.data.x, y: e.data.y }));
+
+      // Log a readable report to the console
+      console.log('\nDouble-click report for extract-test:');
+      for (const d of doubles) {
+        console.log(`- doubleclick at ${d.timestamp} ms at (${d.x}, ${d.y})`);
+      }
+
+      // Also write a JSON report next to the input data for convenience
+      const outPath = path.join(DATA_DIR, SESSION_ID, 'doubleclicks.json');
+      await fs.writeFile(outPath, JSON.stringify(doubles, null, 2));
+      console.log(`Wrote double-click report to: ${outPath}`);
+
+      // Basic assertion: test completes and doubles is an array
+      expect(Array.isArray(doubles)).toBe(true);
+    },
+    { timeout: 60 * 1000 }
+  );
+});
+
 describe('Extraction Pipeline', () => {
   const TEST_SESSION_ID = '6792a2a124f444f0e39ce887';
   const DATA_DIR = path.join(process.cwd(), 'data', 'tests', 'extraction');

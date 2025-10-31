@@ -1,7 +1,7 @@
 import { Message, ProcessedEvent, PipelineStage, TaskMetadata } from "../../shared/types";
 
 export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message[]> {
-    constructor(private taskMetadata?: TaskMetadata) {}
+    constructor(private taskMetadata?: TaskMetadata) { }
 
     async process(events: ProcessedEvent[]): Promise<Message[]> {
         const messages: Message[] = [];
@@ -10,10 +10,10 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
         // Add initial user instruction if available
         if (this.taskMetadata?.content || this.taskMetadata?.description) {
             const userInstruction = this.taskMetadata.content || this.taskMetadata.description;
-            
+
             if (userInstruction) {
                 let finalInstruction = userInstruction;
-                
+
                 // Add structured objectives if available
                 if (this.taskMetadata.objectives && this.taskMetadata.objectives.length > 0) {
                     finalInstruction += "\n\nPlease follow these steps:\n";
@@ -21,7 +21,7 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
                         finalInstruction += `${index + 1}. ${objective}\n`;
                     });
                 }
-                
+
                 messages.push({
                     role: "user",
                     content: finalInstruction.trim(),
@@ -150,6 +150,7 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
 
                 case "mousedrag":
                 case "mouseclick":
+                case "doubleclick":
                 case "type":
                 case "hotkey":
                 case "mousewheel":
@@ -163,6 +164,9 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
                             break;
                         case "mouseclick":
                             action = `click(${event.data.x}, ${event.data.y})`;
+                            break;
+                        case "doubleclick":
+                            action = `double_click(${event.data.x}, ${event.data.y})`;
                             break;
                         case "type":
                             action = `type("${event.data.text}")`;
@@ -191,7 +195,7 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
                     const appStatus = event.data.app_status || 'unknown';
                     const browserDomain = (event.data as any).browser_domain;
                     const focusedAppWithDomain = (event.data as any).focused_app_with_domain;
-                    
+
                     // Include browser domain info in the action for browser apps
                     let appFocusAction = `app_focus(focused: "${focusedApp}", status: "${appStatus}", available: [${availableApps.join(', ')}])`;
                     if (browserDomain) {
@@ -210,7 +214,7 @@ export class MessageFormatter implements PipelineStage<ProcessedEvent[], Message
                             available_apps: event.data.available_apps,
                             app_status: event.data.app_status,
                             all_windows: event.data.all_windows,
-                            ...(browserDomain && { 
+                            ...(browserDomain && {
                                 browser_domain: browserDomain,
                                 focused_app_with_domain: focusedAppWithDomain
                             })

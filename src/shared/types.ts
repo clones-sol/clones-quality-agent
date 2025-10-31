@@ -63,7 +63,7 @@ export interface Message {
 }
 
 export interface ProcessedEvent {
-    type: 'keydown' | 'keyup' | 'mousedown' | 'mouseup' | 'mousedrag' | 'mousewheel' | 'frame' | 'quest' | 'hint' | 'mouseclick' | 'type' | 'hotkey' | 'dense_caption' | 'state_transition' | 'structured_data' | 'reasoning' | 'app_focus';
+    type: 'keydown' | 'keyup' | 'mousedown' | 'mouseup' | 'mousedrag' | 'mousewheel' | 'frame' | 'quest' | 'hint' | 'mouseclick' | 'doubleclick' | 'type' | 'hotkey' | 'dense_caption' | 'state_transition' | 'structured_data' | 'reasoning' | 'app_focus';
     timestamp: number;
     data: {
         delta?: number;
@@ -111,7 +111,7 @@ export interface TaskMetadata {
 export interface ManifestData {
     schema_version: SchemaVersion;
     demonstration_id: string;
-    user_address: string; 
+    user_address: string;
     submission_id: string;
     created_at: string;
     task: {

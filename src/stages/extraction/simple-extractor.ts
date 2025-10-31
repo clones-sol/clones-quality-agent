@@ -269,9 +269,27 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
     let textStartTime: number | null = null;
     let lastKeyTime: number | null = null;
     let lastKnownPos: { x: number; y: number } | null = null;
+    let pendingClick: { x: number; y: number; timestamp: number } | null = null;
 
     const CLICK_THRESHOLD_PX = 5;
     const CLICK_THRESHOLD_MS = 500;
+    const DOUBLE_CLICK_INTERVAL_MS = Number.isFinite(Number(process.env.DOUBLE_CLICK_INTERVAL_MS))
+      ? Number(process.env.DOUBLE_CLICK_INTERVAL_MS)
+      : 400; // typical defaults ~400-500ms
+    const DOUBLE_CLICK_DISTANCE_PX = Number.isFinite(Number(process.env.DOUBLE_CLICK_DISTANCE_PX))
+      ? Number(process.env.DOUBLE_CLICK_DISTANCE_PX)
+      : 6; // small spatial tolerance for double-click
+
+    const flushPendingClick = () => {
+      if (pendingClick) {
+        processedEvents.push({
+          type: 'mouseclick',
+          timestamp: pendingClick.timestamp,
+          data: { x: pendingClick.x, y: pendingClick.y }
+        });
+        pendingClick = null;
+      }
+    };
 
     const flushText = () => {
       if (currentText && textStartTime !== null) {
@@ -294,6 +312,11 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
 
       // Debug: Log all event types to see what we're processing
       console.log(`[EXTRACTOR-DEBUG] Processing event: ${event.event}`);
+
+      // Flush pending single click if the double-click window has elapsed
+      if (pendingClick && time - pendingClick.timestamp > DOUBLE_CLICK_INTERVAL_MS) {
+        flushPendingClick();
+      }
 
       // Check if we need to flush text based on time since last key
       if (currentText && lastKeyTime !== null && time - lastKeyTime > 1000) {
@@ -344,14 +367,37 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
             );
 
             if (distance <= CLICK_THRESHOLD_PX && duration <= CLICK_THRESHOLD_MS) {
-              processedEvents.push({
-                type: 'mouseclick',
-                timestamp: mouseDownTime,
-                data: {
-                  x: mouseDownPos.x,
-                  y: mouseDownPos.y
+              // Candidate click — check for double-click by using a pending buffer
+              const currentClick = { x: mouseDownPos.x, y: mouseDownPos.y, timestamp: mouseDownTime };
+
+              if (pendingClick) {
+                const dt = currentClick.timestamp - pendingClick.timestamp;
+                const dd = Math.sqrt(
+                  Math.pow(currentClick.x - pendingClick.x, 2) +
+                  Math.pow(currentClick.y - pendingClick.y, 2)
+                );
+
+                if (dt <= DOUBLE_CLICK_INTERVAL_MS && dd <= DOUBLE_CLICK_DISTANCE_PX) {
+                  // Emit a double-click and clear pending
+                  processedEvents.push({
+                    type: 'doubleclick',
+                    timestamp: currentClick.timestamp,
+                    data: { x: pendingClick.x, y: pendingClick.y }
+                  });
+                  pendingClick = null;
+                } else {
+                  // Flush previous single click, start a new pending click
+                  processedEvents.push({
+                    type: 'mouseclick',
+                    timestamp: pendingClick.timestamp,
+                    data: { x: pendingClick.x, y: pendingClick.y }
+                  });
+                  pendingClick = currentClick;
                 }
-              });
+              } else {
+                // Start pending single click to wait for possible double-click
+                pendingClick = currentClick;
+              }
             } else if (accumulatedPoints.length > 1) {
               // Resample the path to fixed number of control points
               const splinePoints = this.resamplePoints(accumulatedPoints);
@@ -533,6 +579,16 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
 
     // Flush any remaining text
     flushText();
+
+    // Flush any pending single click at end
+    if (pendingClick) {
+      processedEvents.push({
+        type: 'mouseclick',
+        timestamp: pendingClick.timestamp,
+        data: { x: pendingClick.x, y: pendingClick.y }
+      });
+      pendingClick = null;
+    }
 
     // Debug: Count event types
     const eventTypeCounts = processedEvents.reduce((acc, event) => {

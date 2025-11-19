@@ -9,3 +9,6 @@ export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_MAX_IMAGES = 3;
 export const DEFAULT_MAX_TEXT_LEN = 3000;
 export const DEFAULT_SEED = 42;
+
+// Business rules
+export const MIN_WORKFLOW_ENGAGEMENT_SCORE = 50; // Payment qualification threshold

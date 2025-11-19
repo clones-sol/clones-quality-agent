@@ -113,15 +113,24 @@ export interface MetaData {
     id?: string;
     quest?: {
         title?: string;
-        app: string;
         content?: string;
         objectives?: string[];
+        apps_used?: WorkflowApp[];
+        categories?: string[];
     };
 
     taskDescription?: string;
     platform?: "web" | "desktop" | "other";
-    /** Optional list of requirements for the `checkRequiredActions` programmatic grader. */
     requirements?: string[];
+}
+
+/** Application definition within a multi-app workflow */
+export interface WorkflowApp {
+    name: string;
+    /** Domain for web apps (e.g. 'docs.google.com') or 'desktop'/'mobile' for native apps */
+    domain: string;
+    /** Role/description of this app within the workflow context */
+    description: string;
 }
 
 /** Input items the model can consume for each chunk. */

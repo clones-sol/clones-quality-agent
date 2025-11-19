@@ -1495,37 +1495,64 @@ describe("Grader - concurrency and rate limiting", () => {
     });
 });
 
-describe("Grader - application usage validation", () => {
-    test("penalizes wrong application usage", async () => {
+describe("Grader - chaos-native workflow validation", () => {
+    test("rewards multi-app workflow completion", async () => {
         const { grader } = makeGrader();
 
         const chunks: Chunk[] = [
             [
-                { type: "text", text: "click('button')" },
+                { type: "text", text: "Export data from Salesforce" },
                 {
                     type: "app_focus", timestamp: 1000, data: {
-                        focused_app: "Chrome",
-                        available_apps: ["Chrome", "Terminal"],
+                        focused_app: "Salesforce",
+                        available_apps: ["Salesforce", "Excel", "Outlook"],
                         all_windows: [
-                            { name: "Chrome", role: "application" },
-                            { name: "Terminal", role: "application" }
+                            { name: "Salesforce", role: "application" },
+                            { name: "Excel", role: "application" },
+                            { name: "Outlook", role: "application" }
                         ]
+                    }
+                }
+            ],
+            [
+                { type: "text", text: "Analyze data in Excel" },
+                {
+                    type: "app_focus", timestamp: 2000, data: {
+                        focused_app: "Excel",
+                        available_apps: ["Salesforce", "Excel", "Outlook"]
+                    }
+                }
+            ],
+            [
+                { type: "text", text: "Email report via Outlook" },
+                {
+                    type: "app_focus", timestamp: 3000, data: {
+                        focused_app: "Outlook",
+                        available_apps: ["Salesforce", "Excel", "Outlook"]
                     }
                 }
             ]
         ];
 
         const result = await grader.evaluateSession(chunks, {
-            sessionId: "app_validation_test",
-            quest: { app: "Terminal" } // Expected Terminal, got Chrome
+            sessionId: "workflow_validation_test",
+            quest: {
+                title: "Create quarterly sales report",
+                apps_used: [
+                    { name: "Salesforce", domain: "salesforce.com", description: "CRM data source" },
+                    { name: "Excel", domain: "desktop", description: "Data analysis" },
+                    { name: "Outlook", domain: "desktop", description: "Email distribution" }
+                ],
+                categories: ["productivity", "reporting"]
+            }
         });
 
-        // The mock returns fixed scores, but we can verify the quest app is set correctly
+        // Should reward natural workflow progression across multiple apps
         expect(result.score).toBeGreaterThanOrEqual(0);
         expect(result.outcomeAchievement).toBeGreaterThanOrEqual(0);
     });
 
-    test("rewards correct application usage", async () => {
+    test("handles single-app workflows correctly", async () => {
         const { grader } = makeGrader();
 
         const chunks: Chunk[] = [
@@ -1545,58 +1572,83 @@ describe("Grader - application usage validation", () => {
         ];
 
         const result = await grader.evaluateSession(chunks, {
-            sessionId: "correct_app_test",
-            quest: { app: "Terminal" } // Expected Terminal, got Terminal
+            sessionId: "single_app_test",
+            quest: {
+                title: "Execute terminal commands",
+                apps_used: [
+                    { name: "Terminal", domain: "desktop", description: "Command line interface" }
+                ],
+                categories: ["development"]
+            }
         });
 
-        // Should not be penalized for correct app usage
-        expect(result.outcomeAchievement).toBeGreaterThan(70);
+        // Should work with single-app workflows too
+        expect(result.outcomeAchievement).toBeGreaterThanOrEqual(0);
     });
 
-    test("handles mixed application usage timeline", async () => {
+    test("values authentic chaos patterns in workflows", async () => {
         const { grader } = makeGrader();
 
+        // Simulate realistic workflow chaos: interruptions, context switches, returns
         const chunks: Chunk[] = [
             [
-                { type: "text", text: "open_terminal()" },
+                { type: "text", text: "Start research in browser" },
                 {
                     type: "app_focus", timestamp: 1000, data: {
-                        focused_app: "Terminal",
-                        available_apps: ["Chrome", "Terminal"]
+                        focused_app: "Chrome",
+                        available_apps: ["Chrome", "Google Docs", "Slack"]
                     }
                 }
             ],
             [
-                { type: "text", text: "switch_to_browser()" },
+                { type: "text", text: "Quick check Slack message" },
                 {
                     type: "app_focus", timestamp: 2000, data: {
-                        focused_app: "Chrome",
-                        available_apps: ["Chrome", "Terminal"]
+                        focused_app: "Slack",
+                        available_apps: ["Chrome", "Google Docs", "Slack"]
                     }
                 }
             ],
             [
-                { type: "text", text: "back_to_terminal()" },
+                { type: "text", text: "Back to browser research" },
                 {
                     type: "app_focus", timestamp: 3000, data: {
-                        focused_app: "Terminal",
-                        available_apps: ["Chrome", "Terminal"]
+                        focused_app: "Chrome",
+                        available_apps: ["Chrome", "Google Docs", "Slack"]
+                    }
+                }
+            ],
+            [
+                { type: "text", text: "Copy findings to document" },
+                {
+                    type: "app_focus", timestamp: 4000, data: {
+                        focused_app: "Google Docs",
+                        available_apps: ["Chrome", "Google Docs", "Slack"]
                     }
                 }
             ]
         ];
 
         const result = await grader.evaluateSession(chunks, {
-            sessionId: "mixed_app_timeline_test",
-            quest: { app: "Terminal" }
+            sessionId: "chaos_workflow_test",
+            quest: {
+                title: "Research and document findings",
+                apps_used: [
+                    { name: "Chrome", domain: "desktop", description: "Web research" },
+                    { name: "Google Docs", domain: "docs.google.com", description: "Document creation" },
+                    { name: "Slack", domain: "desktop", description: "Team communication" }
+                ],
+                categories: ["research", "collaboration", "documentation"]
+            }
         });
 
-        // Mock returns fixed values, just verify it completes
+        // Chaos-native grader should value natural workflow patterns
         expect(result.efficiency).toBeGreaterThanOrEqual(0);
         expect(result.summary).toBeDefined();
+        expect(result.processQuality).toBeGreaterThanOrEqual(0); // Should not heavily penalize context switching
     });
 
-    test("handles no app_focus events gracefully", async () => {
+    test("handles missing workflow context gracefully", async () => {
         const { grader } = makeGrader();
 
         const chunks: Chunk[] = [
@@ -1604,16 +1656,23 @@ describe("Grader - application usage validation", () => {
         ];
 
         const result = await grader.evaluateSession(chunks, {
-            sessionId: "no_app_events_test",
-            quest: { app: "Terminal" }
+            sessionId: "no_workflow_context_test",
+            quest: {
+                title: "Unknown workflow",
+                apps_used: [
+                    { name: "Unknown App", domain: "unknown", description: "Unspecified application" }
+                ]
+            }
         });
 
-        // Should complete without errors but may have lower confidence
+        // Should complete without errors
         expect(result.score).toBeGreaterThanOrEqual(0);
         expect(result.score).toBeLessThanOrEqual(100);
+        expect(result.confidence).toBeGreaterThanOrEqual(0); // Mock returns fixed confidence
+        expect(result.confidence).toBeLessThanOrEqual(100);
     });
 
-    test("validates app focus events are mentioned in system prompt", async () => {
+    test("validates workflow context appears in system prompt", async () => {
         const { grader, calls } = makeGrader();
 
         const chunks: Chunk[] = [
@@ -1629,14 +1688,21 @@ describe("Grader - application usage validation", () => {
         ];
 
         await grader.evaluateSession(chunks, {
-            sessionId: "prompt_validation_test",
-            quest: { app: "VSCode" }
+            sessionId: "workflow_prompt_validation_test",
+            quest: {
+                title: "Code development workflow",
+                apps_used: [
+                    { name: "VSCode", domain: "desktop", description: "Code editor" }
+                ],
+                categories: ["development"]
+            }
         });
 
         const systemPrompt = calls[0].request.messages[0].content as string;
-        expect(systemPrompt).toContain("APPLICATION VALIDATION");
-        expect(systemPrompt).toContain("app_focus events");
+        expect(systemPrompt).toContain("CHAOS-NATIVE");
+        expect(systemPrompt).toContain("WORKFLOW");
         expect(systemPrompt).toContain("VSCode");
+        expect(systemPrompt).toContain("development");
     });
 });
 

@@ -310,9 +310,6 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
     for (const event of events) {
       const time = event.time - epoch;
 
-      // Debug: Log all event types to see what we're processing
-      console.log(`[EXTRACTOR-DEBUG] Processing event: ${event.event}`);
-
       // Flush pending single click if the double-click window has elapsed
       if (pendingClick && time - pendingClick.timestamp > DOUBLE_CLICK_INTERVAL_MS) {
         flushPendingClick();
@@ -459,7 +456,6 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
                 }
                 lastKeyTime = time;
                 currentText = !currentText ? actualChar : currentText + actualChar;
-                console.log(`[EXTRACTOR-DEBUG] Using actual_char: key=${event.data.key} -> char="${actualChar}"`);
               } else {
                 // FALLBACK: Use key mapping (legacy behavior for when actual_char is not available)
                 const hasShift = activeModifiers.has('Shift') ||
@@ -553,8 +549,6 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
             const allWindows = axData.tree || [];
             const appStatus = axData.app_status || 'unknown'; // Use app_status from Rust
 
-            console.log(`[EXTRACTOR-DEBUG] app_focus event - focused: ${focusedApp} (${appStatus}), available: [${availableApps.join(', ')}]`);
-
             // Only capture app focus events when we have a valid focused app
             if (focusedApp) {
               processedEvents.push({
@@ -567,9 +561,6 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
                   all_windows: allWindows
                 }
               });
-              console.log(`[EXTRACTOR-DEBUG] ✅ Generated app_focus event for: ${focusedApp} (${appStatus})`);
-            } else {
-              console.log(`[EXTRACTOR-DEBUG] ❌ Skipped app_focus event - no focused app`);
             }
           }
           break;
@@ -589,14 +580,6 @@ export class DemoDesktopExtractor implements PipelineStage<string, ProcessedEven
       });
       pendingClick = null;
     }
-
-    // Debug: Count event types
-    const eventTypeCounts = processedEvents.reduce((acc, event) => {
-      acc[event.type] = (acc[event.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    console.log(`[EXTRACTOR-DEBUG] Generated ${processedEvents.length} total events: ${JSON.stringify(eventTypeCounts)}`);
 
     return processedEvents;
   }

@@ -393,7 +393,7 @@ describe("Grader Integration (real API)", () => {
     );
 
     it(
-        "validates application usage in real API scenario",
+        "validates chaos-native workflow in real API scenario",
         async () => {
             if (!process.env.OPENAI_API_KEY) {
                 console.log("⏭️  Skipping: OPENAI_API_KEY not set");
@@ -403,7 +403,7 @@ describe("Grader Integration (real API)", () => {
             const logger = new IntegrationLogger();
             const config: GraderConfig = {
                 apiKey: process.env.OPENAI_API_KEY!,
-                chunkSize: 3,
+                chunkSize: 2,
                 model: "gpt-4o-mini",
                 timeout: 30_000,
                 maxRetries: 2,
@@ -411,46 +411,60 @@ describe("Grader Integration (real API)", () => {
 
             const grader = new Grader(config, logger);
             
-            // Convert app focus actions to proper chunks with app_focus events
-            const chunks: Chunk[] = [];
-            for (let i = 0; i < sftActionsWithApps.length; i += 3) {
-                const slice = sftActionsWithApps.slice(i, i + 3);
-                const chunkItems = slice.map((action) => {
-                    if (action.startsWith('app_focus(')) {
-                        // Parse app focus data and create app_focus event
-                        const jsonStr = action.match(/app_focus\((.*)\)/)?.[1];
-                        const appData = jsonStr ? JSON.parse(jsonStr) : {};
-                        return {
-                            type: "app_focus" as const,
-                            timestamp: Date.now(),
-                            data: {
-                                focused_app: appData.focused_app,
-                                available_apps: appData.available_apps,
-                                all_windows: appData.available_apps?.map((app: string) => ({
-                                    name: app,
-                                    role: "application"
-                                })) || []
-                            }
-                        };
-                    } else {
-                        return { type: "text" as const, text: action };
+            // Create realistic multi-app workflow chunks
+            const chunks: Chunk[] = [
+                [
+                    { type: "text", text: "Export CRM data" },
+                    {
+                        type: "app_focus",
+                        timestamp: 1000,
+                        data: {
+                            focused_app: "Salesforce",
+                            available_apps: ["Salesforce", "Excel", "Outlook"]
+                        }
                     }
-                });
-                chunks.push(chunkItems);
-            }
+                ],
+                [
+                    { type: "text", text: "Analyze data in spreadsheet" },
+                    {
+                        type: "app_focus",
+                        timestamp: 2000,
+                        data: {
+                            focused_app: "Excel",
+                            available_apps: ["Salesforce", "Excel", "Outlook"]
+                        }
+                    }
+                ],
+                [
+                    { type: "text", text: "Email report to stakeholders" },
+                    {
+                        type: "app_focus",
+                        timestamp: 3000,
+                        data: {
+                            focused_app: "Outlook",
+                            available_apps: ["Salesforce", "Excel", "Outlook"]
+                        }
+                    }
+                ]
+            ];
 
-            const appValidationMeta: MetaData = {
-                sessionId: "app-validation-integration-test",
+            const workflowMeta: MetaData = {
+                sessionId: "workflow-integration-test",
                 platform: "desktop",
-                taskDescription: "Execute terminal commands in Terminal application",
+                taskDescription: "Create quarterly sales report using CRM data",
                 quest: {
-                    app: "Terminal",
-                    title: "Terminal Task",
-                    content: "Use Terminal to execute commands"
+                    title: "Quarterly Sales Report Workflow",
+                    content: "Extract data from Salesforce, analyze in Excel, and distribute via Outlook",
+                    apps_used: [
+                        { name: "Salesforce", domain: "salesforce.com", description: "CRM data source" },
+                        { name: "Excel", domain: "desktop", description: "Data analysis and visualization" },
+                        { name: "Outlook", domain: "desktop", description: "Email distribution" }
+                    ],
+                    categories: ["productivity", "reporting", "collaboration"]
                 }
             };
 
-            const result = await grader.evaluateSession(chunks, appValidationMeta);
+            const result = await grader.evaluateSession(chunks, workflowMeta);
 
             // Basic sanity checks
             expect(result.summary.length).toBeGreaterThan(0);
@@ -459,22 +473,21 @@ describe("Grader Integration (real API)", () => {
             expect(result.score).toBeGreaterThanOrEqual(0);
             expect(result.score).toBeLessThanOrEqual(100);
 
-            // App validation specific checks
-            expect(result.reasoning).toContain("Terminal");
-            expect(result.summary.toLowerCase()).toContain("terminal");
-            
-            // Should mention app usage in observations or reasoning
+            // Workflow validation specific checks
             const fullText = `${result.observations} ${result.reasoning} ${result.summary}`.toLowerCase();
-            expect(fullText).toContain("application");
+            expect(fullText).toMatch(/(workflow|salesforce|excel|outlook)/);
+            
+            // Business rule: Meaningful workflow should score ≥50 for payment
+            expect(result.processQuality).toBeGreaterThanOrEqual(50); // Expected workflow apps engaged purposefully
 
-            console.log(`✅ App validation integration test — score=${result.score}/100`);
-            console.log(`📱 Detected app usage patterns in reasoning: ${result.reasoning.includes("Terminal")}`);
+            console.log(`✅ Workflow integration test — score=${result.score}/100`);
+            console.log(`🌪️ Multi-app workflow recognized: ${fullText.includes("workflow")}`);
         },
         60_000
     );
 
     it(
-        "handles app timeline analysis with real API",
+        "handles authentic chaos timeline with real API",
         async () => {
             if (!process.env.OPENAI_API_KEY) {
                 console.log("⏭️  Skipping: OPENAI_API_KEY not set");
@@ -492,37 +505,283 @@ describe("Grader Integration (real API)", () => {
 
             const grader = new Grader(config, logger);
 
-            // Create timeline with multiple app switches
-            const timelineActions = [
-                'app_focus({"focused_app": "Terminal"})',
-                'type_text("pwd")',
-                'app_focus({"focused_app": "Chrome"})',
-                'navigate_to("website")',
-                'app_focus({"focused_app": "Terminal"})',
-                'type_text("ls")'
+            // Create realistic chaos: research task with interruptions
+            const chunks: Chunk[] = [
+                [
+                    { type: "text", text: "Start web research" },
+                    {
+                        type: "app_focus",
+                        timestamp: 1000,
+                        data: {
+                            focused_app: "Chrome",
+                            available_apps: ["Chrome", "Notion", "Slack"]
+                        }
+                    }
+                ],
+                [
+                    { type: "text", text: "Notification check" },
+                    {
+                        type: "app_focus",
+                        timestamp: 2000,
+                        data: {
+                            focused_app: "Slack",
+                            available_apps: ["Chrome", "Notion", "Slack"]
+                        }
+                    }
+                ],
+                [
+                    { type: "text", text: "Back to research, take notes" },
+                    {
+                        type: "app_focus",
+                        timestamp: 3000,
+                        data: {
+                            focused_app: "Notion",
+                            available_apps: ["Chrome", "Notion", "Slack"]
+                        }
+                    }
+                ],
+                [
+                    { type: "text", text: "Reference back to browser" },
+                    {
+                        type: "app_focus",
+                        timestamp: 4000,
+                        data: {
+                            focused_app: "Chrome",
+                            available_apps: ["Chrome", "Notion", "Slack"]
+                        }
+                    }
+                ]
             ];
 
-            const chunks = toChunks(timelineActions, 2);
-
-            const timelineMeta: MetaData = {
-                sessionId: "timeline-integration-test",
+            const chaosMeta: MetaData = {
+                sessionId: "chaos-timeline-integration-test",
                 platform: "desktop",
-                taskDescription: "Work primarily in Terminal with minimal browser usage",
+                taskDescription: "Research and document findings with authentic human interruptions",
                 quest: {
-                    app: "Terminal",
-                    title: "Terminal Focus Task"
+                    title: "Research Documentation Workflow",
+                    content: "Research topic online and document findings while managing team communications",
+                    apps_used: [
+                        { name: "Chrome", domain: "desktop", description: "Web research" },
+                        { name: "Notion", domain: "notion.so", description: "Documentation" },
+                        { name: "Slack", domain: "desktop", description: "Team communication" }
+                    ],
+                    categories: ["research", "documentation", "collaboration"]
                 }
             };
 
-            const result = await grader.evaluateSession(chunks, timelineMeta);
+            const result = await grader.evaluateSession(chunks, chaosMeta);
 
             expect(result.score).toBeGreaterThanOrEqual(0);
             expect(result.score).toBeLessThanOrEqual(100);
 
-            // Efficiency should be affected by app switching
-            expect(result.efficiency).toBeLessThan(90);
+            // Business rule: Authentic multi-app workflow should score ≥50 for payment  
+            expect(result.processQuality).toBeGreaterThanOrEqual(50); // Genuine workflow patterns qualify for payment
+            
+            const fullText = `${result.observations} ${result.reasoning} ${result.summary}`.toLowerCase();
+            const mentionsMultiApp = /((chrome|notion|slack).*){2,}/.test(fullText);
 
-            console.log(`✅ Timeline analysis integration test — efficiency=${result.efficiency}/100`);
+            console.log(`✅ Chaos timeline integration test — process=${result.processQuality}/100`);
+            console.log(`🌪️ Multi-app chaos recognized: ${mentionsMultiApp}`);
+        },
+        60_000
+    );
+
+    it(
+        "evaluates complex development workflow with multiple IDEs and tools",
+        async () => {
+            if (!process.env.OPENAI_API_KEY) {
+                console.log("⏭️  Skipping: OPENAI_API_KEY not set");
+                return;
+            }
+
+            const logger = new IntegrationLogger();
+            const config: GraderConfig = {
+                apiKey: process.env.OPENAI_API_KEY!,
+                chunkSize: 3,
+                model: "gpt-4o-mini",
+                timeout: 40_000,
+                maxRetries: 2,
+            };
+
+            const grader = new Grader(config, logger);
+
+            // Realistic development workflow: coding → testing → documentation → deployment
+            const chunks: Chunk[] = [
+                [
+                    { type: "text", text: "Edit main application code" },
+                    {
+                        type: "app_focus",
+                        timestamp: 1000,
+                        data: {
+                            focused_app: "VSCode",
+                            available_apps: ["VSCode", "Terminal", "Chrome", "Postman", "GitHub Desktop"]
+                        }
+                    },
+                    { type: "text", text: "Save changes and switch to testing" }
+                ],
+                [
+                    { type: "text", text: "Run unit tests in terminal" },
+                    {
+                        type: "app_focus",
+                        timestamp: 2000,
+                        data: {
+                            focused_app: "Terminal",
+                            available_apps: ["VSCode", "Terminal", "Chrome", "Postman", "GitHub Desktop"]
+                        }
+                    },
+                    { type: "text", text: "Tests pass, now test API endpoints" }
+                ],
+                [
+                    { type: "text", text: "Test API with Postman" },
+                    {
+                        type: "app_focus",
+                        timestamp: 3000,
+                        data: {
+                            focused_app: "Postman",
+                            available_apps: ["VSCode", "Terminal", "Chrome", "Postman", "GitHub Desktop"]
+                        }
+                    },
+                    { type: "text", text: "API responses look good" }
+                ],
+                [
+                    { type: "text", text: "Update documentation in browser" },
+                    {
+                        type: "app_focus",
+                        timestamp: 4000,
+                        data: {
+                            focused_app: "Chrome",
+                            available_apps: ["VSCode", "Terminal", "Chrome", "Postman", "GitHub Desktop"]
+                        }
+                    },
+                    { type: "text", text: "Documentation updated, ready to commit" }
+                ],
+                [
+                    { type: "text", text: "Commit changes via GitHub Desktop" },
+                    {
+                        type: "app_focus",
+                        timestamp: 5000,
+                        data: {
+                            focused_app: "GitHub Desktop",
+                            available_apps: ["VSCode", "Terminal", "Chrome", "Postman", "GitHub Desktop"]
+                        }
+                    },
+                    { type: "text", text: "Changes committed and pushed" }
+                ]
+            ];
+
+            const devWorkflowMeta: MetaData = {
+                sessionId: "dev-workflow-integration-test",
+                platform: "desktop",
+                taskDescription: "Complete software development cycle from coding to deployment",
+                quest: {
+                    title: "Full-Stack Development Workflow",
+                    content: "Implement feature, test functionality, update docs, and deploy changes",
+                    apps_used: [
+                        { name: "VSCode", domain: "desktop", description: "Code editing and development" },
+                        { name: "Terminal", domain: "desktop", description: "Running tests and commands" },
+                        { name: "Postman", domain: "desktop", description: "API testing" },
+                        { name: "Chrome", domain: "desktop", description: "Documentation and web testing" },
+                        { name: "GitHub Desktop", domain: "desktop", description: "Version control" }
+                    ],
+                    categories: ["development", "testing", "documentation", "deployment"]
+                }
+            };
+
+            const result = await grader.evaluateSession(chunks, devWorkflowMeta);
+
+            // Complex workflows should be recognized and valued
+            expect(result.score).toBeGreaterThanOrEqual(0);
+            expect(result.score).toBeLessThanOrEqual(100);
+            expect(result.outcomeAchievement).toBeGreaterThan(50); // Should recognize workflow completion
+            
+            const fullText = `${result.observations} ${result.reasoning} ${result.summary}`.toLowerCase();
+            const mentionsDevTools = /(vscode|terminal|postman|github)/.test(fullText);
+
+            console.log(`✅ Complex dev workflow test — outcome=${result.outcomeAchievement}/100`);
+            console.log(`💻 Development tools recognized: ${mentionsDevTools}`);
+        },
+        80_000
+    );
+
+    it(
+        "handles workflow with minimal app switching (focused work)",
+        async () => {
+            if (!process.env.OPENAI_API_KEY) {
+                console.log("⏭️  Skipping: OPENAI_API_KEY not set");
+                return;
+            }
+
+            const logger = new IntegrationLogger();
+            const config: GraderConfig = {
+                apiKey: process.env.OPENAI_API_KEY!,
+                chunkSize: 2,
+                model: "gpt-4o-mini",
+                timeout: 30_000,
+                maxRetries: 2,
+            };
+
+            const grader = new Grader(config, logger);
+
+            // Focused work session with minimal context switching
+            const chunks: Chunk[] = [
+                [
+                    { type: "text", text: "Open design project" },
+                    {
+                        type: "app_focus",
+                        timestamp: 1000,
+                        data: {
+                            focused_app: "Figma",
+                            available_apps: ["Figma", "Slack", "Chrome"]
+                        }
+                    }
+                ],
+                [
+                    { type: "text", text: "Create wireframe layouts" },
+                    {
+                        type: "app_focus",
+                        timestamp: 2000,
+                        data: {
+                            focused_app: "Figma",
+                            available_apps: ["Figma", "Slack", "Chrome"]
+                        }
+                    }
+                ],
+                [
+                    { type: "text", text: "Add design components and refine" },
+                    {
+                        type: "app_focus",
+                        timestamp: 3000,
+                        data: {
+                            focused_app: "Figma",
+                            available_apps: ["Figma", "Slack", "Chrome"]
+                        }
+                    }
+                ]
+            ];
+
+            const focusedMeta: MetaData = {
+                sessionId: "focused-workflow-integration-test",
+                platform: "desktop", 
+                taskDescription: "Create design mockups in focused work session",
+                quest: {
+                    title: "UI Design Focus Session",
+                    content: "Design user interface mockups with deep focus",
+                    apps_used: [
+                        { name: "Figma", domain: "figma.com", description: "Design and prototyping" }
+                    ],
+                    categories: ["design", "focus"]
+                }
+            };
+
+            const result = await grader.evaluateSession(chunks, focusedMeta);
+
+            expect(result.score).toBeGreaterThanOrEqual(0);
+            expect(result.score).toBeLessThanOrEqual(100);
+            
+            // Should reward focused work (high efficiency for single-app workflow)
+            expect(result.efficiency).toBeGreaterThan(60);
+
+            console.log(`✅ Focused workflow test — efficiency=${result.efficiency}/100`);
         },
         60_000
     );

@@ -8,6 +8,7 @@ import {
     DEFAULT_MODEL,
     DEFAULT_SEED,
     DEFAULT_TIMEOUT_MS,
+    MIN_WORKFLOW_ENGAGEMENT_SCORE,
 } from "./grader/constants";
 import { PermanentError, GraderError, TimeoutError, TransientError } from "./grader/errors";
 import { DefaultLogger } from "./grader/logger";
@@ -415,7 +416,7 @@ export class Grader {
         );
 
         const finalUserText = getFinalUserPrompt(
-            !!isWorkflow,
+            isWorkflow,
             expectedApps,
             totalAppFocusEvents,
             appFocusStats,
@@ -852,7 +853,7 @@ export class Grader {
 
         // Workflow engagement floor - business requirement for payment qualification
         if (workflowEngagement) {
-            blended = Math.max(blended, 50);
+            blended = Math.max(blended, MIN_WORKFLOW_ENGAGEMENT_SCORE);
         }
 
         // Outcome achievement floors - reward successful completion
@@ -884,7 +885,7 @@ export class Grader {
         return clamp(Math.round(s), 0, 100);
     }
 
-    private isAppMatch(focusedApp: string, expectedApp: any, browserDomain?: string): boolean {
+    private isAppMatch(focusedApp: string, expectedApp: WorkflowApp, browserDomain?: string): boolean {
         const lowerFocused = focusedApp.toLowerCase();
         const lowerExpected = expectedApp.name.toLowerCase();
 
@@ -988,10 +989,10 @@ export class Grader {
             ? meta.quest.apps_used.map(app => `${app.name} (${app.domain}) - ${app.description}`).join('\n  • ')
             : 'Single application workflow';
 
-        const header = getChaosHeader(meta, workflowApps, !!isWorkflow);
+        const header = getChaosHeader(meta, workflowApps, isWorkflow!, MIN_WORKFLOW_ENGAGEMENT_SCORE);
 
         const rubricAppsList = isWorkflow ? meta.quest!.apps_used!.map(a => a.name).join(' + ') : '';
-        const rubric = getChaosRubric(!!isWorkflow, rubricAppsList);
+        const rubric = getChaosRubric(isWorkflow!, rubricAppsList, MIN_WORKFLOW_ENGAGEMENT_SCORE);
 
         const weights =
             `Scoring weights (must be reflected in component scores): ` +

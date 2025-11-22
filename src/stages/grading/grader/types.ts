@@ -120,7 +120,11 @@ export interface MetaData {
     };
 
     taskDescription?: string;
-    platform?: "web" | "desktop" | "other";
+
+    /** Optional platform identifier (e.g., "windows", "macos", "linux"). */
+    platform?: string;
+
+    /** Optional list of requirements for the checkRequiredActions programmatic grader. */
     requirements?: string[];
 }
 

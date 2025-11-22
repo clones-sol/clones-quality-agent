@@ -8,6 +8,8 @@ import {
     DEFAULT_MODEL,
     DEFAULT_SEED,
     DEFAULT_TIMEOUT_MS,
+    MIN_SINGLE_APP_EVENTS,
+    MIN_WORKFLOW_APPS_USED,
     MIN_WORKFLOW_ENGAGEMENT_SCORE,
 } from "./grader/constants";
 import { PermanentError, GraderError, TimeoutError, TransientError } from "./grader/errors";
@@ -886,6 +888,10 @@ export class Grader {
     }
 
     private isAppMatch(focusedApp: string, expectedApp: WorkflowApp, browserDomain?: string): boolean {
+        if (!expectedApp?.name) {
+            return false;
+        }
+
         const lowerFocused = focusedApp.toLowerCase();
         const lowerExpected = expectedApp.name.toLowerCase();
 
@@ -931,11 +937,11 @@ export class Grader {
             });
         });
 
-        // Consider workflow engaged if user touched at least 2 expected apps or significant usage of 1 app
+        // Consider workflow engaged if user touched minimum apps or significant usage of 1 app
         const appsUsed = workflowAppCoverage.size;
         const totalEvents = Array.from(workflowAppCoverage.values()).reduce((sum, count) => sum + count, 0);
 
-        return appsUsed >= 2 || (appsUsed >= 1 && totalEvents >= 3);
+        return appsUsed >= MIN_WORKFLOW_APPS_USED || (appsUsed >= 1 && totalEvents >= MIN_SINGLE_APP_EVENTS);
     }
 
     private estimateEvidenceCount(summary: string, observations: string, reasoning: string): number {

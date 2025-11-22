@@ -12,3 +12,5 @@ export const DEFAULT_SEED = 42;
 
 // Business rules
 export const MIN_WORKFLOW_ENGAGEMENT_SCORE = 50; // Payment qualification threshold
+export const MIN_WORKFLOW_APPS_USED = 2; // Minimum apps to qualify as workflow engagement
+export const MIN_SINGLE_APP_EVENTS = 3; // Minimum events for single-app workflow engagement

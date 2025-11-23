@@ -74,7 +74,9 @@ upload_file() {
         --region auto \
         --metadata "version=$version,platform=$platform,uploaded=$upload_date" \
         --content-type "application/octet-stream" \
-        --no-progress
+        --no-progress \
+        --cli-read-timeout 300 \
+        --cli-connect-timeout 60
     
     log_success "Uploaded: $file_name → $s3_key"
     echo "  📄 Direct URL: ${BUCKET_URL}/${s3_key}"

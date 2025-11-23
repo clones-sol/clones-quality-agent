@@ -8,14 +8,14 @@ import path from 'path';
 export class Pipeline {
   private readonly CURRENT_SCHEMA_VERSION: SchemaVersion = { major: 1, minor: 0, patch: 0 };
 
-  constructor(private config: PipelineConfig) {}
+  constructor(private config: PipelineConfig) { }
 
   private validateSchemaVersion(filePath: string, fileSchema: SchemaVersion): void {
     const current = this.CURRENT_SCHEMA_VERSION;
-    
+
     // Compatible if same major version and file minor <= current minor
     const isCompatible = fileSchema.major === current.major && fileSchema.minor <= current.minor;
-    
+
     if (!isCompatible) {
       throw new Error(
         `Schema version incompatible in ${filePath}: ` +
@@ -23,13 +23,13 @@ export class Pipeline {
         `expected ${current.major}.x.x with minor <= ${current.minor}`
       );
     }
-    
+
     console.log(`[SCHEMA] ${filePath}: v${fileSchema.major}.${fileSchema.minor}.${fileSchema.patch} ✓`);
   }
 
   private async validateSessionSchemas(sessionId: string): Promise<void> {
     const sessionDir = path.join(this.config.dataDir, sessionId);
-    
+
     // Check meta.json schema version
     try {
       const metaPath = path.join(sessionDir, 'meta.json');
@@ -89,7 +89,7 @@ export class Pipeline {
   async process(sessionId: string): Promise<ProcessedEvent[]> {
     // Validate schema versions first
     await this.validateSessionSchemas(sessionId);
-    
+
     let allEvents: ProcessedEvent[] = [];
 
     // Run extractors first
@@ -104,6 +104,9 @@ export class Pipeline {
     }
 
     // Run browser URL extraction (only if OpenAI API key is available)
+    /* 
+    // DISABLED for Video Grading Optimization (Nov 2025)
+    // URL extraction via OCR is redundant with Gemini Video analysis and costly.
     if (process.env.OPENAI_API_KEY) {
       try {
         const browserUrlExtractor = new BrowserUrlExtractor();
@@ -116,6 +119,7 @@ export class Pipeline {
     } else {
       console.log('[Pipeline] Skipping browser URL extraction (OPENAI_API_KEY not set)');
     }
+    */
 
     // Then run augmenters on the combined events
     for (const augmenter of this.config.augmenters) {

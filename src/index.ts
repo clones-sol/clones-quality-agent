@@ -12,7 +12,8 @@ import { TaskMetadata } from './shared/types';
 import path from 'path';
 
 import { Grader } from './stages/grading/grader';
-import { GraderLogger, Chunk, MetaData } from './stages/grading/grader/types';
+import { VideoGrader } from './stages/grading/video-grader'; // New import
+import { GraderLogger, Chunk, MetaData, GradeResult } from './stages/grading/grader/types';
 
 import packageJson from '../package.json';
 
@@ -43,48 +44,18 @@ import { parseArgs } from 'util';
 const { values } = parseArgs({
   args: Bun.argv,
   options: {
-    data: {
-      short: 'd',
-      type: 'string'
-    },
-    out: {
-      short: 'o',
-      type: 'string'
-    },
-    sessions: {
-      short: 's',
-      type: 'string'
-    },
-    input: {
-      short: 'i',
-      type: 'string'
-    },
-    format: {
-      short: 'f',
-      type: 'string'
-    },
-    grade: {
-      type: 'boolean',
-      default: false
-    },
-    'chunk-size': {
-      type: 'string',
-      default: '4'
-    },
-    ffmpeg: {
-      type: 'string',
-      default: 'ffmpeg'
-    },
-    ffprobe: {
-      type: 'string',
-      default: 'ffprobe'
-    },
-    'model': {
-      type: 'string'
-    },
-    'evaluation-model': {
-      type: 'string'
-    },
+    data: { short: 'd', type: 'string' },
+    out: { short: 'o', type: 'string' },
+    sessions: { short: 's', type: 'string' },
+    input: { short: 'i', type: 'string' },
+    format: { short: 'f', type: 'string' },
+    grade: { type: 'boolean', default: false },
+    'chunk-size': { type: 'string', default: '4' },
+    ffmpeg: { type: 'string', default: 'ffmpeg' },
+    ffprobe: { type: 'string', default: 'ffprobe' },
+    'model': { type: 'string' },
+    'evaluation-model': { type: 'string' },
+    'video-mode': { type: 'boolean', default: false } // Force video mode
   },
   strict: true,
   allowPositionals: true
@@ -93,16 +64,12 @@ const { values } = parseArgs({
 // Convert an array of SFT messages into Grader chunks of size N
 function sftToChunks(messages: any[], chunkSize: number): Chunk[] {
   console.log(`[SFT-DEBUG] Processing ${messages.length} SFT messages`);
-  
+
   const items = (messages ?? []).map((m: any) => {
     // Check for app_focus events in SFT data
     if (m && m.type === 'app_focus') {
       console.log(`[SFT-DEBUG] Found app_focus event: ${JSON.stringify(m)}`);
-      return {
-        type: 'app_focus',
-        timestamp: m.timestamp,
-        data: m.data
-      };
+      return { type: 'app_focus', timestamp: m.timestamp, data: m.data };
     }
     // Common cases: { role, content }, or strings
     if (typeof m === 'string') return { type: 'text', text: String(m) };
@@ -122,10 +89,20 @@ function sftToChunks(messages: any[], chunkSize: number): Chunk[] {
 }
 
 
-// Check for OpenAI API key if grading
-if (values.grade && !process.env.OPENAI_API_KEY) {
-  console.error('Error: OPENAI_API_KEY environment variable is required for grading mode');
-  process.exit(1);
+// Check for API keys
+if (values.grade) {
+  // If video mode is forced OR Gemini key is present, we prioritize Video Grading
+  const useVideoGrading = values['video-mode'] || !!process.env.GEMINI_API_KEY;
+
+  if (useVideoGrading && !process.env.GEMINI_API_KEY) {
+    console.error('Error: GEMINI_API_KEY environment variable is required for Video Grading mode');
+    process.exit(1);
+  }
+
+  if (!useVideoGrading && !process.env.OPENAI_API_KEY) {
+    console.error('Error: OPENAI_API_KEY environment variable is required for Text Grading mode');
+    process.exit(1);
+  }
 }
 
 // Handle both input formats
@@ -170,6 +147,48 @@ const pipeline = new Pipeline({
 
 console.log(`Starting processing of ${sessions.length} sessions...`);
 
+// --- VIDEO GRADING LOGIC ---
+async function gradeVideoSession(
+  grader: VideoGrader,
+  session: string,
+  videoPath: string,
+  metaPath: string,
+  outDir: string
+): Promise<void> {
+  console.log(`🎥 Video Grading session: ${session}`);
+
+  let metaJson: any = {};
+  try {
+    metaJson = await Bun.file(metaPath).json();
+  } catch (e) {
+    console.warn(`Warning: Could not read meta.json: ${e}`);
+  }
+
+  const meta: MetaData = {
+    sessionId: session,
+    platform: format === 'desktop' ? 'desktop' : 'web',
+    taskDescription: metaJson?.quest?.title ?? metaJson?.title ?? metaJson?.description ?? undefined,
+    quest: metaJson?.quest ?? undefined,
+    id: metaJson?.id ?? undefined,
+  };
+
+  const result = await grader.evaluateSession(videoPath, meta);
+
+  if (result) {
+    console.log('\nVideo Grading complete!');
+    console.log(`\nCQA version: ${result.version}`);
+    console.log(`Score: ${result.score}/100 (Confidence: ${(result.confidence).toFixed(1)}%)`);
+    console.log('\nSummary:');
+    console.log(result.summary);
+
+    await Bun.write(path.join(outDir, session, 'scores.json'), JSON.stringify(result, null, 2));
+  } else {
+    console.error('Failed to grade video session');
+  }
+}
+
+
+// --- TEXT GRADING LOGIC ---
 async function gradeSftFile(
   grader: Grader,
   session: string,
@@ -197,19 +216,7 @@ async function gradeSftFile(
   const result = await grader.evaluateSession(chunks, meta);
   if (result) {
     console.log('\nGrading complete!');
-    console.log(`\nCQA version: ${result.version}`);
-    console.log(`Score: ${result.score}/100 (Confidence: ${(result.confidence).toFixed(1)}%) - ${result.confidenceReasoning}`);
-    console.log('\nScore Breakdown:');
-    console.log(`- Outcome Achievement: ${result.outcomeAchievement}/100 - ${result.outcomeAchievementReasoning}`);
-    console.log(`- Process Quality: ${result.processQuality}/100 - ${result.processQualityReasoning}`);
-    console.log(`- Efficiency: ${result.efficiency}/100 - ${result.efficiencyReasoning}`);
-    console.log('\nSummary:');
-    console.log(result.summary);
-    console.log('\nObservations:');
-    console.log(result.observations);
-    console.log('\nReasoning:');
-    console.log(result.reasoning);
-
+    console.log(`Score: ${result.score}/100`);
     await Bun.write(path.join(outDir, session, 'scores.json'), JSON.stringify(result, null, 2));
   } else {
     console.error('Failed to grade session');
@@ -231,7 +238,7 @@ async function runPipelineAndFormat(
   let taskMetadata: TaskMetadata | undefined = undefined;
   const metaPath = path.join(dataDir, session, 'meta.json');
   const manifestPath = path.join(dataDir, session, 'manifest.json');
-  
+
   try {
     if (await Bun.file(metaPath).exists()) {
       const meta = await Bun.file(metaPath).json();
@@ -241,7 +248,6 @@ async function runPipelineAndFormat(
         content: meta?.quest?.content || meta?.description,
         objectives: meta?.quest?.objectives
       };
-      console.log(`[FORMATTER-DEBUG] Loaded task metadata from meta.json: ${taskMetadata.content}`);
     } else if (await Bun.file(manifestPath).exists()) {
       const manifest = await Bun.file(manifestPath).json();
       taskMetadata = {
@@ -249,7 +255,6 @@ async function runPipelineAndFormat(
         description: manifest?.task?.description,
         content: manifest?.task?.description
       };
-      console.log(`[FORMATTER-DEBUG] Loaded task metadata from manifest.json: ${taskMetadata.content}`);
     }
   } catch (error) {
     console.log(`[FORMATTER-DEBUG] Could not load task metadata: ${error}`);
@@ -272,11 +277,26 @@ async function processSession(
   outDir: string,
   format: string,
   chunkSize: number,
-  grader?: Grader
+  grader?: Grader | VideoGrader
 ): Promise<void> {
   console.log(`\nProcessing session: ${session}`);
   const sftPath = path.join(dataDir, session, 'sft.json');
+  const videoPath = path.join(dataDir, session, 'recording.mp4');
   const metaPath = path.join(dataDir, session, 'meta.json');
+
+  // Check if we should use Video Grading
+  // Condition: Grader is VideoGrader AND video file exists
+  if (grader instanceof VideoGrader) {
+    if (await Bun.file(videoPath).exists()) {
+      await gradeVideoSession(grader, session, videoPath, metaPath, outDir);
+      return; // Skip text pipeline if video grading is successful
+    } else {
+      console.warn(`[WARNING] Video grading enabled but recording.mp4 not found for session ${session}. Falling back to text pipeline...`);
+      // Fallback or error? For now, we fall back to pipeline generation but we can't grade if the grader is VideoGrader type.
+    }
+  }
+
+  // Legacy Text Pipeline
   const sftExists = await Bun.file(sftPath).exists();
 
   if (!sftExists) {
@@ -286,7 +306,7 @@ async function processSession(
     console.log('Found existing sft.json.');
   }
 
-  if (grader) {
+  if (grader && !(grader instanceof VideoGrader)) {
     await gradeSftFile(grader, session, sftPath, metaPath, outDir, chunkSize, format);
   }
 }
@@ -296,128 +316,44 @@ async function processAllSessions() {
     ? Number(values['chunk-size'])
     : 4;
 
+  let grader: Grader | VideoGrader | undefined;
+
   if (values.grade) {
     const productionLogger = new ProductionLogger();
-    const allMetrics: any[] = [];
-    const grader = new Grader(
-      {
-        apiKey: process.env.OPENAI_API_KEY!,
-        chunkSize,
-        model: values.model,
-        evaluationModel: values['evaluation-model'],
-        timeout: 60_000,
-        maxRetries: 3,
-        seed: 42,
-        rateLimiter: { maxTokens: 10, refillRate: 2 },
-        onMetrics: metrics => {
-          allMetrics.push(metrics);
-        }
-      },
-      productionLogger
-    );
 
-    console.log(`Starting parallel processing of ${sessions.length} sessions...`);
-    const sessionPromises = sessions.map(session =>
-      processSession(session, pipeline, dataDir, outDir, format, chunkSize, grader).catch(
-        error => {
-          console.error(`Error processing session ${session}:`, error.message);
-          return null;
-        }
-      )
-    );
-    await Promise.allSettled(sessionPromises);
+    // DECISION LOGIC: VIDEO VS TEXT
+    // If GEMINI_API_KEY is present, we default to Video Grading (Gemini 2.0 Flash)
+    // Unless overridden? No, let's keep it simple.
 
-    const stats = grader.getRateLimiterStats();
-    console.log(
-      `\nRate limiter stats: ${stats.tokens} tokens remaining, ${stats.queueLength} requests queued`
-    );
-
-    const results = await Promise.allSettled(sessionPromises);
-    const successful = results.filter(r => r.status === 'fulfilled').length;
-    const failed = sessions.length - successful;
-    console.log(
-      `\nCompleted: ${successful} successful, ${failed} failed out of ${sessions.length} sessions`
-    );
-
-    // Generate metrics summary for each session
-    const sessionMetrics = sessions.map(sessionId => {
-      const sessionData = allMetrics.filter(m => m.context.sessionId === sessionId);
-
-      if (sessionData.length === 0) {
-        return {
-          sessionId,
-          status: 'failed',
-          error: 'No metrics collected (processing failed)',
-          totalRequests: 0,
-          totalTokens: 0,
-          totalDuration: 0,
-          averageRetries: 0
-        };
-      }
-
-      const totalTokens = sessionData.reduce((sum, m) => sum + (m.usage?.totalTokens || 0), 0);
-      const totalDuration = sessionData.reduce((sum, m) => sum + m.timing.durationMs, 0);
-      const totalRetries = sessionData.reduce((sum, m) => sum + m.timing.retryCount, 0);
-      const successfulRequests = sessionData.filter(m => m.outcome === 'success').length;
-
-      return {
-        sessionId,
-        status: successfulRequests === sessionData.length ? 'success' : 'partial_failure',
-        totalRequests: sessionData.length,
-        successfulRequests,
-        failedRequests: sessionData.length - successfulRequests,
-        totalTokens,
-        totalDuration,
-        averageRetries: sessionData.length > 0 ? (totalRetries / sessionData.length) : 0,
-        details: sessionData.map(m => ({
-          responseId: m.responseId,
-          type: m.context.isFinal ? 'final' : 'chunk',
-          chunkIndex: m.context.chunkIndex,
-          outcome: m.outcome,
-          tokens: m.usage?.totalTokens || 0,
-          duration: m.timing.durationMs,
-          retries: m.timing.retryCount,
-          error: m.error?.message
-        }))
-      };
-    });
-
-    // Write metrics.json for each session
-    for (const sessionMetric of sessionMetrics) {
-      const metricsPath = path.join(outDir, sessionMetric.sessionId, 'metrics.json');
-      await Bun.write(metricsPath, JSON.stringify(sessionMetric, null, 2));
-      console.log(`📊 Metrics written to: ${metricsPath}`);
+    if (process.env.GEMINI_API_KEY) {
+      console.log("🌟 Video Grading Mode Enabled (Gemini API Key detected)");
+      grader = new VideoGrader({
+        apiKey: process.env.GEMINI_API_KEY,
+        model: values.model || 'gemini-2.0-flash', // Default to the fast one
+      }, productionLogger);
+    } else if (process.env.OPENAI_API_KEY) {
+      console.log("📝 Text Grading Mode Enabled (OpenAI API Key detected)");
+      grader = new Grader(
+        {
+          apiKey: process.env.OPENAI_API_KEY!,
+          chunkSize,
+          model: values.model,
+          evaluationModel: values['evaluation-model'],
+          timeout: 60_000,
+          maxRetries: 3,
+          seed: 42,
+          rateLimiter: { maxTokens: 10, refillRate: 2 }
+        },
+        productionLogger
+      );
     }
+  }
 
-    // Write global metrics summary
-    const globalMetrics = {
-      timestamp: new Date().toISOString(),
-      pipeline: {
-        version: "2.0.0",
-        mode: "grading",
-        sessions: sessions.length,
-        successful: successful,
-        failed: failed
-      },
-      totals: {
-        requests: allMetrics.length,
-        successfulRequests: allMetrics.filter(m => m.outcome === 'success').length,
-        tokens: allMetrics.reduce((sum, m) => sum + (m.usage?.totalTokens || 0), 0),
-        duration: allMetrics.reduce((sum, m) => sum + m.timing.durationMs, 0),
-        retries: allMetrics.reduce((sum, m) => sum + m.timing.retryCount, 0)
-      },
-      rateLimiter: stats,
-      sessions: sessionMetrics
-    };
+  console.log(`Starting processing of ${sessions.length} sessions...`);
 
-    const globalMetricsPath = path.join(outDir, 'metrics.json');
-    await Bun.write(globalMetricsPath, JSON.stringify(globalMetrics, null, 2));
-    console.log(`📊 Global metrics written to: ${globalMetricsPath}`);
-  } else {
-    console.log(`Starting sequential processing of ${sessions.length} sessions...`);
-    for (const session of sessions) {
-      await processSession(session, pipeline, dataDir, outDir, format, chunkSize);
-    }
+  // Sequential processing for simplicity and clarity in logs
+  for (const session of sessions) {
+    await processSession(session, pipeline, dataDir, outDir, format, chunkSize, grader);
   }
 }
 

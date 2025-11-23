@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager, FileState } from "@google/generative-ai/server";
+import fs from "fs";
 import {
     GradeResult,
     GraderConfig,
@@ -86,11 +87,25 @@ export class VideoGrader {
 
         let uploadResult;
         try {
+            if (!fs.existsSync(videoPath)) {
+                throw new Error(`Video file not found: ${videoPath}`);
+            }
+            const stats = fs.statSync(videoPath);
+            if (stats.size === 0) {
+                throw new Error(`Video file is empty: ${videoPath}`);
+            }
+            this.logger.info(`Video size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+
             // 1. Upload
             this.logger.debug(`Uploading video: ${videoPath}`);
+
+            // Sanitize and shorten displayName (keep it simple to avoid 400 Bad Request)
+            const shortId = meta.sessionId.length > 10 ? meta.sessionId.substring(0, 10) : meta.sessionId;
+            const displayName = `Session-${shortId}`;
+
             uploadResult = await this.fileManager.uploadFile(videoPath, {
                 mimeType: "video/mp4",
-                displayName: `Session-${meta.sessionId}`,
+                displayName: displayName,
             });
 
             // 2. Wait for processing

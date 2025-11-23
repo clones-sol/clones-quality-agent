@@ -28,6 +28,11 @@ export interface GradeResult {
         completionTime?: number;
         requiredActionsMet?: boolean;
         efficiencyMetrics?: EfficiencyScore;
+        videoAnalysis?: Array<{
+            timestamp_seconds: number;
+            description: string;
+            status: string;
+        }>;
     };
 }
 

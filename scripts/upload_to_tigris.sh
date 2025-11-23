@@ -66,17 +66,33 @@ upload_file() {
     local upload_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     
     log_info "Uploading $file_name (${file_size} bytes) to $s3_key..."
-    
-    # Upload to S3-compatible Tigris storage with metadata
-    aws s3 cp "$file_path" \
-        "s3://${TIGRIS_BUCKET}/${s3_key}" \
-        --endpoint-url "$TIGRIS_ENDPOINT" \
-        --region auto \
-        --metadata "version=$version,platform=$platform,uploaded=$upload_date" \
-        --content-type "application/octet-stream" \
-        --no-progress \
-        --cli-read-timeout 300 \
-        --cli-connect-timeout 60
+
+    # Upload to S3-compatible Tigris storage with metadata and retries
+    local max_retries=3
+    local retry_count=0
+
+    while [ $retry_count -lt $max_retries ]; do
+        if aws s3 cp "$file_path" \
+            "s3://${TIGRIS_BUCKET}/${s3_key}" \
+            --endpoint-url "$TIGRIS_ENDPOINT" \
+            --region auto \
+            --metadata "version=$version,platform=$platform,uploaded=$upload_date" \
+            --content-type "application/octet-stream" \
+            --no-progress \
+            --cli-read-timeout 300 \
+            --cli-connect-timeout 60; then
+            break
+        fi
+
+        retry_count=$((retry_count + 1))
+        if [ $retry_count -lt $max_retries ]; then
+            log_warning "Upload failed, retrying ($retry_count/$max_retries)..."
+            sleep 5
+        else
+            log_error "Upload failed after $max_retries attempts"
+            return 1
+        fi
+    done
     
     log_success "Uploaded: $file_name → $s3_key"
     echo "  📄 Direct URL: ${BUCKET_URL}/${s3_key}"

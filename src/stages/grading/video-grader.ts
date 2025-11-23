@@ -99,13 +99,10 @@ export class VideoGrader {
             // 1. Upload
             this.logger.debug(`Uploading video: ${videoPath}`);
 
-            // Sanitize and shorten displayName (keep it simple to avoid 400 Bad Request)
-            const shortId = meta.sessionId.length > 10 ? meta.sessionId.substring(0, 10) : meta.sessionId;
-            const displayName = `Session-${shortId}`;
-
+            // Use simple displayName to avoid encoding issues
             uploadResult = await this.fileManager.uploadFile(videoPath, {
                 mimeType: "video/mp4",
-                displayName: displayName,
+                displayName: "SessionVideo",
             });
 
             // 2. Wait for processing

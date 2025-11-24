@@ -7,7 +7,7 @@ import fs from 'fs';
 const SESSION_ID = "20251123_204932";
 const BASE_DIR = path.resolve(__dirname, "../test-data/grading-video");
 const SESSION_DIR = path.join(BASE_DIR, SESSION_ID);
-const VIDEO_PATH = path.join(SESSION_DIR, "recording.mp4");
+const VIDEO_PATH = '/Users/SSe/Library/Application Support/ai.clones.agent-devnet/recordings/20251123_223830/recording.mp4';
 const META_PATH = path.join(SESSION_DIR, "meta.json");
 
 async function runTest() {

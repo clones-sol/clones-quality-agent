@@ -287,7 +287,11 @@ async function processSession(
   // Check if we should use Video Grading
   // Condition: Grader is VideoGrader AND video file exists
   if (grader instanceof VideoGrader) {
-    if (await Bun.file(videoPath).exists()) {
+    const videoFile = Bun.file(videoPath);
+    if (await videoFile.exists()) {
+      const videoSize = videoFile.size;
+      console.log(`[VIDEO-CHECK] Video file found: ${videoPath}`);
+      console.log(`[VIDEO-CHECK] Video file size: ${videoSize} bytes (${(videoSize / 1024 / 1024).toFixed(2)} MB)`);
       await gradeVideoSession(grader, session, videoPath, metaPath, outDir);
       return; // Skip text pipeline if video grading is successful
     } else {

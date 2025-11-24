@@ -10,6 +10,7 @@ import { VIDEO_GRADING_SYSTEM_PROMPT, getVideoUserPrompt } from "./grader/video-
 import { MIN_WORKFLOW_ENGAGEMENT_SCORE } from "./grader/constants";
 import { DefaultLogger } from "./grader/logger";
 import { clamp } from "./grader/utils";
+import { PermanentError, TransientError, GraderError } from "./grader/errors";
 import packageJson from "../../../package.json"; // Import package.json
 
 // Schema for structured output (Zod-like structure for Gemini)
@@ -61,6 +62,7 @@ export class VideoGrader {
     private logger: GraderLogger;
     private expertModelName: string;
     private filterModelName: string = "gemini-2.0-flash";
+    private maxRetries: number;
 
     private weights = {
         outcome: 50,
@@ -76,6 +78,7 @@ export class VideoGrader {
         this.logger = logger ?? new DefaultLogger();
 
         this.expertModelName = config.model || "gemini-2.0-flash";
+        this.maxRetries = config.maxRetries ?? 3; // Default to 3 retries
     }
 
     async evaluateSession(videoPath: string, meta: MetaData): Promise<GradeResult> {
@@ -133,22 +136,28 @@ export class VideoGrader {
                 Return JSON: { "passed": boolean, "reason": string }
             `;
 
-            const filterResult = await this.genAI.models.generateContent({
-                model: this.filterModelName,
-                contents: [
-                    {
-                        role: "user",
-                        parts: [
-                            { fileData: { mimeType: file.mimeType!, fileUri: file.uri! } },
-                            { text: filterPrompt },
-                        ]
-                    }
-                ],
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: filterSchema as any
-                }
-            });
+            const filterResult = await this.executeWithRetry(
+                async () => {
+                    return await this.genAI.models.generateContent({
+                        model: this.filterModelName,
+                        contents: [
+                            {
+                                role: "user",
+                                parts: [
+                                    { fileData: { mimeType: file.mimeType!, fileUri: file.uri! } },
+                                    { text: filterPrompt },
+                                ]
+                            }
+                        ],
+                        config: {
+                            responseMimeType: "application/json",
+                            responseSchema: filterSchema as any
+                        }
+                    });
+                },
+                "Filter Check",
+                meta.sessionId
+            );
 
             const filterResponse = JSON.parse(filterResult.text!);
 
@@ -181,22 +190,28 @@ export class VideoGrader {
             const userPrompt = getVideoUserPrompt(meta);
 
             this.logger.debug(`Sending full context to Expert Model (${this.expertModelName})...`);
-            const result = await this.genAI.models.generateContent({
-                model: this.expertModelName,
-                contents: [
-                    {
-                        role: "user",
-                        parts: [
-                            { fileData: { mimeType: file.mimeType!, fileUri: file.uri! } },
-                            { text: systemPrompt + "\n\n" + userPrompt },
-                        ]
-                    }
-                ],
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: gradingSchema as any
-                }
-            });
+            const result = await this.executeWithRetry(
+                async () => {
+                    return await this.genAI.models.generateContent({
+                        model: this.expertModelName,
+                        contents: [
+                            {
+                                role: "user",
+                                parts: [
+                                    { fileData: { mimeType: file.mimeType!, fileUri: file.uri! } },
+                                    { text: systemPrompt + "\n\n" + userPrompt },
+                                ]
+                            }
+                        ],
+                        config: {
+                            responseMimeType: "application/json",
+                            responseSchema: gradingSchema as any
+                        }
+                    });
+                },
+                "Expert Analysis",
+                meta.sessionId
+            );
 
             const responseText = result.text!;
             const evaluation = JSON.parse(responseText);
@@ -276,19 +291,7 @@ export class VideoGrader {
         eff: number,
         workflowEngagement?: boolean
     ): number {
-        // Cap efficiency penalty impact to max 15 points
-        const effPenaltyCap = 15;
-        const baseFromOutcomeProcess =
-            (outcome * this.weights.outcome + process * this.weights.process) / 100;
-        const effComponent = (eff * this.weights.efficiency) / 100;
-
-        // Efficiency doesn't add above 0 relative to base, and cannot penalize beyond the cap
-        // (Logic adapted to match grader.ts intent: efficiency adds to score, but poor efficiency shouldn't kill a good run too hard)
-        // Actually, let's stick to the exact logic from grader.ts:
-        // It seems grader.ts logic was slightly complex regarding penalties.
-        // Let's simplify but keep the SPIRIT:
-        // If outcome is high, we guarantee a floor.
-
+        // Calculate blended score from all components
         let blended = (outcome * this.weights.outcome + process * this.weights.process + eff * this.weights.efficiency) / 100;
 
         // Workflow engagement floor - business requirement for payment qualification
@@ -323,5 +326,164 @@ export class VideoGrader {
         if (outcome >= 80) s += 3;
 
         return clamp(Math.round(s), 0, 100);
+    }
+
+    /**
+     * Classifies Gemini API errors into Permanent, Transient, or Unknown
+     */
+    private classifyGeminiError(error: any): GraderError {
+        // Extract error details from Gemini API error structure
+        let statusCode: number | undefined;
+        let message = error?.message || String(error);
+
+        // Gemini API errors come as: { error: { code: number, message: string, status: string } }
+        if (error?.error) {
+            statusCode = error.error.code;
+            message = error.error.message || message;
+        }
+
+        // Check for status code in the error object directly
+        if (!statusCode && typeof error?.status === 'number') {
+            statusCode = error.status;
+        }
+
+        this.logger.debug(`Classifying Gemini error: status=${statusCode}, message=${message}`);
+
+        // Permanent errors (4xx client errors except 429)
+        if (statusCode && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
+            return new PermanentError(
+                `Permanent Gemini API error: ${message}`,
+                statusCode,
+                error
+            );
+        }
+
+        // Transient errors (5xx server errors and 429 rate limits)
+        if (statusCode && (statusCode === 429 || (statusCode >= 500 && statusCode < 600))) {
+            return new TransientError(
+                `Transient Gemini API error: ${message}`,
+                statusCode,
+                undefined, // Gemini doesn't provide Retry-After headers consistently
+                error
+            );
+        }
+
+        // Network-related errors
+        if (message.toLowerCase().includes('network') ||
+            message.toLowerCase().includes('connection') ||
+            message.toLowerCase().includes('timeout') ||
+            message.toLowerCase().includes('econnreset')) {
+            return new TransientError(
+                `Network error: ${message}`,
+                undefined,
+                undefined,
+                error
+            );
+        }
+
+        // Default to transient for unknown errors (conservative approach)
+        return new TransientError(
+            `Unknown Gemini error (treating as transient): ${message}`,
+            statusCode,
+            undefined,
+            error
+        );
+    }
+
+    /**
+     * Executes a Gemini API call with retry logic and exponential backoff
+     */
+    private async executeWithRetry<T>(
+        operation: () => Promise<T>,
+        operationName: string,
+        sessionId: string
+    ): Promise<T> {
+        let attempt = 0;
+        let lastError: GraderError | undefined;
+        const retryDelays: number[] = [];
+
+        while (attempt < this.maxRetries) {
+            try {
+                this.logger.debug(`${operationName}: Attempt ${attempt + 1}/${this.maxRetries}`, undefined, { sessionId });
+                const result = await operation();
+
+                if (attempt > 0) {
+                    this.logger.info(`${operationName}: Succeeded after ${attempt} retries`, undefined, {
+                        sessionId,
+                        attempt,
+                        retryDelays
+                    });
+                }
+
+                return result;
+            } catch (error: any) {
+                const classifiedError = this.classifyGeminiError(error);
+                lastError = classifiedError;
+                attempt++;
+
+                // Handle permanent errors immediately (no retry)
+                if (classifiedError instanceof PermanentError) {
+                    this.logger.error(`${operationName}: Permanent error; no retry`, classifiedError, {
+                        sessionId,
+                        statusCode: classifiedError.statusCode,
+                        attempt
+                    });
+                    throw classifiedError;
+                }
+
+                // Handle transient errors with exponential backoff
+                if (classifiedError instanceof TransientError) {
+                    if (attempt >= this.maxRetries) {
+                        this.logger.error(`${operationName}: Max retries reached`, classifiedError, {
+                            sessionId,
+                            statusCode: classifiedError.statusCode,
+                            totalAttempts: attempt,
+                            retryDelays
+                        });
+                        break;
+                    }
+
+                    // Exponential backoff: 500ms * 2^(attempt-1) + jitter, capped at 8s
+                    const delay = Math.min(8000, 500 * Math.pow(2, attempt - 1)) + Math.random() * 250;
+                    retryDelays.push(delay);
+
+                    this.logger.warn(`${operationName}: Transient error; retrying with backoff`, classifiedError, {
+                        sessionId,
+                        attempt,
+                        delay: `${Math.round(delay)}ms`,
+                        statusCode: classifiedError.statusCode,
+                        maxRetries: this.maxRetries
+                    });
+
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+
+                // Fallback for unknown error types
+                if (attempt >= this.maxRetries) {
+                    this.logger.error(`${operationName}: Max retries reached`, classifiedError, {
+                        sessionId,
+                        totalAttempts: attempt,
+                        retryDelays
+                    });
+                    break;
+                }
+
+                const delay = Math.min(8000, 500 * Math.pow(2, attempt - 1)) + Math.random() * 250;
+                retryDelays.push(delay);
+
+                this.logger.warn(`${operationName}: Unknown error; retrying with backoff`, classifiedError, {
+                    sessionId,
+                    attempt,
+                    delay: `${Math.round(delay)}ms`,
+                    maxRetries: this.maxRetries
+                });
+
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+
+        // All retries exhausted
+        throw lastError || new TransientError(`${operationName} failed after ${this.maxRetries} retries`);
     }
 }

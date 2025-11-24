@@ -1,6 +1,6 @@
 {
   "name": "clones-quality-agent",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "scripts": {
     "test": "bun test",
     "test:grading": "bun run scripts/test-grading.ts",
@@ -19,7 +19,7 @@
   "license": "MIT",
   "description": "",
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^1.30.0",
     "canvas": "^3.2.0",
     "cli-table3": "^0.6.5",
     "mongodb": "^6.19.0",

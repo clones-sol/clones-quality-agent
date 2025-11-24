@@ -1,5 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { GoogleAIFileManager, FileState } from "@google/generative-ai/server";
+import { GoogleGenAI, FileState } from "@google/genai";
 import fs from "fs";
 import {
     GradeResult,
@@ -58,8 +57,7 @@ const filterSchema = {
 };
 
 export class VideoGrader {
-    private genAI: GoogleGenerativeAI;
-    private fileManager: GoogleAIFileManager;
+    private genAI: GoogleGenAI;
     private logger: GraderLogger;
     private expertModelName: string;
     private filterModelName: string = "gemini-2.0-flash";
@@ -74,8 +72,7 @@ export class VideoGrader {
         if (!config.apiKey) {
             throw new Error("VideoGrader: apiKey is required (GEMINI_API_KEY)");
         }
-        this.genAI = new GoogleGenerativeAI(config.apiKey);
-        this.fileManager = new GoogleAIFileManager(config.apiKey);
+        this.genAI = new GoogleGenAI({ apiKey: config.apiKey });
         this.logger = logger ?? new DefaultLogger();
 
         this.expertModelName = config.model || "gemini-2.0-flash";
@@ -99,20 +96,19 @@ export class VideoGrader {
             // 1. Upload
             this.logger.debug(`Uploading video: ${videoPath}`);
 
-            // Use simple displayName to avoid encoding issues
-            uploadResult = await this.fileManager.uploadFile(videoPath, {
-                mimeType: "video/mp4",
-                displayName: "SessionVideo",
+            uploadResult = await this.genAI.files.upload({
+                file: videoPath,
+                config: { mimeType: "video/mp4" }
             });
 
             // 2. Wait for processing
-            let file = await this.fileManager.getFile(uploadResult.file.name);
+            let file = await this.genAI.files.get({ name: uploadResult.name! });
             let attempts = 0;
             const maxAttempts = 60; // 2 minutes max
 
             while (file.state === FileState.PROCESSING && attempts < maxAttempts) {
                 await new Promise((resolve) => setTimeout(resolve, 2000));
-                file = await this.fileManager.getFile(uploadResult.file.name);
+                file = await this.genAI.files.get({ name: uploadResult.name! });
                 attempts++;
             }
 
@@ -129,13 +125,6 @@ export class VideoGrader {
             // STEP 1: THE FILTER - Gemini 1.5/2.0 Flash
             // ---------------------------------------------------------
             this.logger.info("Step 1: Running Filter Check...");
-            const filterModel = this.genAI.getGenerativeModel({
-                model: this.filterModelName,
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: filterSchema as any
-                }
-            });
 
             const filterPrompt = `
                 TASK: Quick Pass/Fail check.
@@ -144,12 +133,24 @@ export class VideoGrader {
                 Return JSON: { "passed": boolean, "reason": string }
             `;
 
-            const filterResult = await filterModel.generateContent([
-                { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
-                { text: filterPrompt },
-            ]);
+            const filterResult = await this.genAI.models.generateContent({
+                model: this.filterModelName,
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { fileData: { mimeType: file.mimeType!, fileUri: file.uri! } },
+                            { text: filterPrompt },
+                        ]
+                    }
+                ],
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: filterSchema as any
+                }
+            });
 
-            const filterResponse = JSON.parse(filterResult.response.text());
+            const filterResponse = JSON.parse(filterResult.text!);
 
             if (!filterResponse.passed) {
                 this.logger.warn(`Session filtered out by Flash. Reason: ${filterResponse.reason}`);
@@ -176,29 +177,28 @@ export class VideoGrader {
             // STEP 2: THE EXPERT - Gemini 3 Pro (or configured model)
             // ---------------------------------------------------------
 
-            const expertModel = this.genAI.getGenerativeModel({
+            const systemPrompt = VIDEO_GRADING_SYSTEM_PROMPT;
+            const userPrompt = getVideoUserPrompt(meta);
+
+            this.logger.debug(`Sending full context to Expert Model (${this.expertModelName})...`);
+            const result = await this.genAI.models.generateContent({
                 model: this.expertModelName,
-                generationConfig: {
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { fileData: { mimeType: file.mimeType!, fileUri: file.uri! } },
+                            { text: systemPrompt + "\n\n" + userPrompt },
+                        ]
+                    }
+                ],
+                config: {
                     responseMimeType: "application/json",
                     responseSchema: gradingSchema as any
                 }
             });
 
-            const systemPrompt = VIDEO_GRADING_SYSTEM_PROMPT;
-            const userPrompt = getVideoUserPrompt(meta);
-
-            this.logger.debug(`Sending full context to Expert Model (${this.expertModelName})...`);
-            const result = await expertModel.generateContent([
-                {
-                    fileData: {
-                        mimeType: file.mimeType,
-                        fileUri: file.uri,
-                    },
-                },
-                { text: systemPrompt + "\n\n" + userPrompt },
-            ]);
-
-            const responseText = result.response.text();
+            const responseText = result.text!;
             const evaluation = JSON.parse(responseText);
 
             // ---------------------------------------------------------
@@ -243,10 +243,10 @@ export class VideoGrader {
             this.logger.error("Video Grading failed", error as Error);
             throw error;
         } finally {
-            if (uploadResult) {
+            if (uploadResult?.name) {
                 try {
-                    this.logger.debug(`Deleting remote file: ${uploadResult.file.name}`);
-                    await this.fileManager.deleteFile(uploadResult.file.name);
+                    this.logger.debug(`Deleting remote file: ${uploadResult.name}`);
+                    await this.genAI.files.delete({ name: uploadResult.name });
                 } catch (cleanupError) {
                     this.logger.warn("Failed to cleanup remote file", cleanupError as Error);
                 }

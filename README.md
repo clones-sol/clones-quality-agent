@@ -25,7 +25,9 @@ Process recordings from the Clones factory demos and (optionally) grade task com
 
 * [Bun](https://bun.sh) 1.2+
 * `ffmpeg` and `ffprobe` on your PATH (for video extraction)
-* For grading mode: `OPENAI_API_KEY`
+* For grading mode:
+  * `GEMINI_API_KEY` - Video Grading mode (recommended, uses Gemini 2.0)
+  * `OPENAI_API_KEY` - Text Grading mode (fallback, uses OpenAI GPT models)
 
 ## Input Data Formats
 
@@ -72,16 +74,45 @@ bun run src/index.ts -f desktop -i .
 * `-i, --input`         Session directory (parent used as data & output)
 * `--ffmpeg`            Path to `ffmpeg` (default: `ffmpeg`)
 * `--ffprobe`           Path to `ffprobe` (default: `ffprobe`)
-* `--grade`             Enable grading mode (requires `OPENAI_API_KEY`)
-* `--chunk-size`        Messages per chunk when grading (default: 4)
-* `--model`             Model for chunk evaluation (e.g., `gpt-4o-mini`)
-* `--evaluation-model`  Model for final evaluation (falls back to `--model`)
+* `--grade`             Enable grading mode
+* `--video-mode`        Force video grading mode (auto-enabled if `GEMINI_API_KEY` is set)
+* `--chunk-size`        Messages per chunk when text grading (default: 4)
+* `--model`             Model for evaluation (e.g., `gemini-2.0-flash` or `gpt-4o-mini`)
+* `--evaluation-model`  Model for final evaluation in text mode (falls back to `--model`)
 
 ---
 
 ## Grading mode
 
-The grader evaluates a session using structured JSON outputs and a deterministic scoring model.
+The grader evaluates a session using structured JSON outputs and a deterministic scoring model. Two modes are available:
+
+### Video Grading Mode (Recommended)
+
+When `GEMINI_API_KEY` is set, the system uses **Video Grading** which analyzes the screen recording directly using Gemini's vision capabilities.
+
+**Key features:**
+* **Two-step evaluation**: Fast filter (Gemini Flash) → Expert analysis (configurable model)
+* **Direct video analysis**: No intermediate text conversion needed
+* **Visual verification**: Identifies correct apps, UI elements, and task completion
+* **Automatic file cleanup**: Uploaded videos are deleted after processing
+
+**Setup:**
+```bash
+export GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+**Requirements:**
+* Session must contain `recording.mp4` file
+* Uses `meta.json` for task context and objectives
+
+**How it works:**
+1. **Filter step** (Gemini Flash): Quick pass/fail check on task completion
+2. **Expert step** (configurable): Detailed analysis with timestamps and scoring
+3. **Scoring**: Same weighted scoring as text mode (50% outcome, 30% process, 20% efficiency)
+
+### Text Grading Mode (Fallback)
+
+When only `OPENAI_API_KEY` is set, the system uses **Text Grading** which analyzes the SFT messages.
 
 ### Key properties
 
@@ -101,17 +132,27 @@ The grader evaluates a session using structured JSON outputs and a deterministic
 ### Setup
 
 ```bash
-export OPENAI_API_KEY=your_api_key_here
+# For Video Grading (recommended)
+export GEMINI_API_KEY=your_gemini_api_key_here
+
+# For Text Grading (fallback)
+export OPENAI_API_KEY=your_openai_api_key_here
 ```
 
 ### Run
 
 ```bash
-# Grade existing sft.json in the current session directory
+# Grade using video (if GEMINI_API_KEY is set and recording.mp4 exists)
 bun run src/index.ts -i . --grade
 
-# Or process multiple sessions and then grade each
+# Force video mode explicitly
+bun run src/index.ts -i . --grade --video-mode
+
+# Grade multiple sessions
 bun run src/index.ts -d data -s session1,session2 -o output --grade
+
+# Specify model for video grading
+bun run src/index.ts -i . --grade --model gemini-2.5-pro-preview-06-05
 ```
 
 ### What grading produces
@@ -120,7 +161,7 @@ For each session, `scores.json`:
 
 ```json
 {
-  "version": "2.0.0",
+  "version": "3.0.3-video",
   "summary": "One-paragraph outcome summary.",
   "observations": "• High-level bullets (2–6 points)\n• No chain-of-thought",
   "reasoning": "Short final rationale.",
@@ -132,9 +173,23 @@ For each session, `scores.json`:
   "confidenceReasoning": "Justification for the confidence score.",
   "outcomeAchievementReasoning": "Justification for the outcome achievement score.",
   "processQualityReasoning": "Justification for the process quality score.",
-  "efficiencyReasoning": "Justification for the efficiency score."
+  "efficiencyReasoning": "Justification for the efficiency score.",
+  "programmaticResults": {
+    "videoAnalysis": [
+      {
+        "timestamp_seconds": 5,
+        "description": "User clicked login button",
+        "status": "success"
+      }
+    ]
+  }
 }
 ```
+
+**Version suffixes:**
+* `X.Y.Z-video` - Video grading mode
+* `X.Y.Z-video-filtered` - Session failed the filter step
+* `X.Y.Z` - Text grading mode
 
 ### Advanced: Dual-Model Evaluation
 
@@ -547,9 +602,12 @@ bun run test:grading:integration
 
 ## Troubleshooting
 
-* **Missing `OPENAI_API_KEY`**: Set the environment variable for grading.
+* **Missing API key**: Set `GEMINI_API_KEY` for video grading or `OPENAI_API_KEY` for text grading.
 * **`ffmpeg` / `ffprobe` not found**: Install and ensure both are on PATH.
-* **Timeouts**: Increase `timeout` or reduce chunk size.
+* **Video not found**: Ensure `recording.mp4` exists in the session directory for video grading.
+* **Video processing timeout**: Gemini has a 2-minute processing limit for uploaded videos.
+* **Filtered sessions**: If score is 20 with `-video-filtered` version, the task was not visually completed.
+* **Timeouts**: Increase `timeout` or reduce chunk size (text mode only).
 * **Invalid model output**: The grader throws on bad JSON; check prompts and input size, then rerun.
 
 ---

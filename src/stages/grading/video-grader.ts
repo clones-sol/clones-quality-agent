@@ -231,7 +231,13 @@ export class VideoGrader {
 
             const rawScore = this.computeDeterministicScore(outcome, process, efficiency);
             const guardedScore = this.applyBusinessGuards(rawScore, outcome, process, efficiency, workflowEngagement);
-            const finalScore = this.calibratePiecewise(guardedScore, outcome);
+            let finalScore = this.calibratePiecewise(guardedScore, outcome);
+
+            // Hard outcome floor for reward qualification (outcome must be ≥50 to qualify)
+            if (outcome < 50) {
+                finalScore = Math.min(finalScore, 45);
+                this.logger.debug(`Applied hard outcome floor: outcome=${outcome} < 50, capped score at 45`);
+            }
 
             this.logger.info(`Grading complete. Raw: ${rawScore} -> Final: ${finalScore}/100`);
 

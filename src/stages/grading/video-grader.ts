@@ -129,10 +129,35 @@ export class VideoGrader {
             // ---------------------------------------------------------
             this.logger.info("Step 1: Running Filter Check...");
 
+            // Build objectives list for strict filtering
+            const objectivesList = meta.quest?.objectives && meta.quest.objectives.length > 0
+                ? meta.quest.objectives.map((obj, i) => `${i + 1}. ${obj}`).join('\n')
+                : `Complete the task: "${meta.taskDescription || 'Complete the task'}"`;
+
             const filterPrompt = `
-                TASK: Quick Pass/Fail check.
-                Look at the video. Did the user achieve the main objective: "${meta.taskDescription || 'Complete the task'}"?
-                Ignore minor hesitations. Just check if the END STATE looks successful (e.g. document created, message sent).
+                TASK: Strict Pass/Fail check - The user must complete AT LEAST 50% of the required objectives.
+
+                Required objectives:
+                ${objectivesList}
+
+                Watch the video carefully. Evaluate if the user completed at LEAST half (50%) of these objectives.
+
+                CRITICAL REQUIREMENTS:
+                - NOT just started or opened an app
+                - NOT just partial progress on the first step
+                - Must show SUBSTANTIAL progress through the workflow
+                - The user must have moved beyond initial setup to actual task execution
+
+                Examples of FAIL:
+                - Only opened one application without using it meaningfully
+                - Just searched for data without collecting or organizing it
+                - Started but didn't complete any significant milestone
+
+                Examples of PASS:
+                - Completed multiple objectives (at least 50%)
+                - Clear progress visible through the workflow
+                - Final deliverable exists or is nearly complete
+
                 Return JSON: { "passed": boolean, "reason": string }
             `;
 
@@ -219,9 +244,21 @@ export class VideoGrader {
             // ---------------------------------------------------------
             // STEP 3: SCORING & CALIBRATION (Ported from grader.ts)
             // ---------------------------------------------------------
-            const outcome = clamp(evaluation.outcomeAchievement, 0, 100);
-            const process = clamp(evaluation.processQuality, 0, 100);
-            const efficiency = clamp(evaluation.efficiency, 0, 100);
+            let outcome = clamp(evaluation.outcomeAchievement, 0, 100);
+            let process = clamp(evaluation.processQuality, 0, 100);
+            let efficiency = clamp(evaluation.efficiency, 0, 100);
+
+            // Apply reality checks: cap process/efficiency when outcome is poor
+            // Prevents inflated scores from generous AI assessments of trivial actions
+            if (outcome < 30) {
+                process = Math.min(process, 40);
+                efficiency = Math.min(efficiency, 30);
+                this.logger.debug(`Applied low-outcome caps: outcome=${outcome} < 30, capped process=${process}, efficiency=${efficiency}`);
+            } else if (outcome < 50) {
+                process = Math.min(process, 60);
+                efficiency = Math.min(efficiency, 50);
+                this.logger.debug(`Applied medium-outcome caps: outcome=${outcome} < 50, capped process=${process}, efficiency=${efficiency}`);
+            }
 
             // Determine workflow engagement from metadata
             const isWorkflow = meta.quest?.apps_used && meta.quest.apps_used.length > 0;

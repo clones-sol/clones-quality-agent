@@ -127,38 +127,75 @@ export class VideoGrader {
             // ---------------------------------------------------------
             // STEP 1: THE FILTER - Gemini 1.5/2.0 Flash
             // ---------------------------------------------------------
-            this.logger.info("Step 1: Running Filter Check...");
 
             // Build objectives list for strict filtering
             const objectivesList = meta.quest?.objectives && meta.quest.objectives.length > 0
                 ? meta.quest.objectives.map((obj, i) => `${i + 1}. ${obj}`).join('\n')
                 : `Complete the task: "${meta.taskDescription || 'Complete the task'}"`;
 
+            // Extract required apps from objectives (tagged with <app>...</app>)
+            const requiredApps: string[] = [];
+            if (meta.quest?.objectives) {
+                meta.quest.objectives.forEach(obj => {
+                    const appMatches = obj.match(/<app>(.*?)<\/app>/g);
+                    if (appMatches) {
+                        appMatches.forEach(match => {
+                            const appName = match.replace(/<\/?app>/g, '');
+                            if (!requiredApps.includes(appName)) {
+                                requiredApps.push(appName);
+                            }
+                        });
+                    }
+                });
+            }
+
+            this.logger.info("Step 1: Running Filter Check...");
+            if (requiredApps.length > 0) {
+                this.logger.debug(`Extracted ${requiredApps.length} required apps from objectives: ${requiredApps.join(', ')}`);
+            }
+
+            const appRequirementText = requiredApps.length > 0
+                ? `\n\nCRITICAL - REQUIRED APPS FOR THIS WORKFLOW:\n${requiredApps.map((app, i) => `${i + 1}. ${app}`).join('\n')}\n\nIf the user did NOT open ALL ${requiredApps.length} of these apps, this is an AUTOMATIC FAIL.\nOpening ${Math.floor(requiredApps.length / 2)} out of ${requiredApps.length} apps = Not a genuine workflow attempt.`
+                : '';
+
             const filterPrompt = `
-                TASK: Strict Pass/Fail check - The user must complete AT LEAST 50% of the required objectives.
+                TASK: Fast Quality Filter - Reject OBVIOUSLY empty or worthless sessions to save API costs.
 
                 Required objectives:
-                ${objectivesList}
+                ${objectivesList}${appRequirementText}
 
-                Watch the video carefully. Evaluate if the user completed at LEAST half (50%) of these objectives.
+                This is a COST-SAVING filter. Only FAIL sessions that are CLEARLY worthless:
 
-                CRITICAL REQUIREMENTS:
-                - NOT just started or opened an app
-                - NOT just partial progress on the first step
-                - Must show SUBSTANTIAL progress through the workflow
-                - The user must have moved beyond initial setup to actual task execution
+                AUTOMATIC FAIL (reject immediately):
+                1. User did NOT open all required apps (see CRITICAL section above)
+                2. Video < 10 seconds with no meaningful action
+                3. User only opened 1 app and immediately closed/stopped recording
+                4. User just clicked around desktop/browser without opening any relevant apps
+                5. Completely blank screen or frozen video
+                6. User opened apps but didn't interact AT ALL (no typing, no clicks inside apps)
+                7. Video shows only login screens or loading spinners
 
-                Examples of FAIL:
-                - Only opened one application without using it meaningfully
-                - Just searched for data without collecting or organizing it
-                - Started but didn't complete any significant milestone
+                PASS (send to Expert for detailed grading):
+                - User opened ALL required apps AND showed some interaction (even if incomplete)
+                - User typed or generated ANY content in at least one app
+                - User made SOME progress toward the task (even if only 10-20%)
+                - Session shows genuine attempt at the full workflow, even if poorly executed
 
-                Examples of PASS:
-                - Completed multiple objectives (at least 50%)
-                - Clear progress visible through the workflow
-                - Final deliverable exists or is nearly complete
+                Examples for THIS filter's purpose (cost savings):
+                - FAIL: 5-second video showing desktop only → Waste of Expert API cost
+                - FAIL: Opened ChatGPT, stared at it, closed → No interaction at all
+                - FAIL: Opened 2 out of 4 required apps → Missing workflow apps
+                - PASS: Opened all 4 apps, typed a bit, stopped early → Let Expert grade the quality (might be 20/100)
+                - PASS: Opened all apps, generated content in 1-2, didn't finish → Expert will grade low, but genuine attempt
 
-                Return JSON: { "passed": boolean, "reason": string }
+                Remember: This filter's job is NOT to judge quality. Just filter OBVIOUS garbage to save money.
+                If in doubt → PASS and let the Expert model judge.
+
+                Return JSON:
+                {
+                    "passed": boolean,
+                    "reason": string (if failed, explain what obvious red flag triggered rejection)
+                }
             `;
 
             const filterResult = await this.executeWithRetry(
@@ -184,6 +221,7 @@ export class VideoGrader {
                 meta.sessionId
             );
 
+            this.logger.info(`Filter result: ${filterResult.text}`);
             const filterResponse = JSON.parse(filterResult.text!);
 
             if (!filterResponse.passed) {

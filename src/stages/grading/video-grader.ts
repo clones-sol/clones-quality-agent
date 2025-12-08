@@ -51,10 +51,15 @@ const gradingSchema = {
 const filterSchema = {
     type: "object",
     properties: {
-        passed: { type: "boolean", description: "True if the user appears to have completed the main task visually." },
-        reason: { type: "string", description: "Brief explanation if failed." }
+        passed: { type: "boolean", description: "True if the session shows a genuine attempt (not obviously empty)." },
+        reason: { type: "string", description: "Brief explanation of the decision." },
+        apps_opened: {
+            type: "array",
+            items: { type: "string" },
+            description: "List of apps that the user visibly opened in the video (exact names from objectives)."
+        }
     },
-    required: ["passed", "reason"]
+    required: ["passed", "reason", "apps_opened"]
 };
 
 export class VideoGrader {
@@ -155,7 +160,13 @@ export class VideoGrader {
             }
 
             const appRequirementText = requiredApps.length > 0
-                ? `\n\nCRITICAL - REQUIRED APPS FOR THIS WORKFLOW:\n${requiredApps.map((app, i) => `${i + 1}. ${app}`).join('\n')}\n\nIf the user did NOT open ALL ${requiredApps.length} of these apps, this is an AUTOMATIC FAIL.\nOpening ${Math.floor(requiredApps.length / 2)} out of ${requiredApps.length} apps = Not a genuine workflow attempt.`
+                ? `\n\n═══════════════════════════════════════════════════
+CRITICAL - REQUIRED APPS FOR THIS WORKFLOW:
+${requiredApps.map((app, i) => `${i + 1}. "${app}"`).join('\n')}
+═══════════════════════════════════════════════════
+
+If the user did NOT open ALL ${requiredApps.length} of these apps, this is an AUTOMATIC FAIL.
+Opening ${Math.floor(requiredApps.length / 2)} out of ${requiredApps.length} apps = Not a genuine workflow attempt.`
                 : '';
 
             const filterPrompt = `
@@ -194,8 +205,36 @@ export class VideoGrader {
                 Return JSON:
                 {
                     "passed": boolean,
-                    "reason": string (if failed, explain what obvious red flag triggered rejection)
+                    "reason": string (explanation of decision),
+                    "apps_opened": [array of strings - COPY-PASTE the exact names from REQUIRED APPS section]
                 }
+
+                ═══════════════════════════════════════════════════
+                CRITICAL INSTRUCTIONS FOR apps_opened ARRAY:
+                ═══════════════════════════════════════════════════
+
+                This array is CRITICALLY IMPORTANT. You MUST follow these rules EXACTLY:
+
+                1. ONLY use names from the "REQUIRED APPS" list above
+                2. COPY-PASTE the exact string (without the surrounding quotes)
+                3. Do NOT improvise, paraphrase, or shorten names
+                4. Do NOT add apps that aren't in the REQUIRED APPS list
+
+                Example for THIS specific task:
+                ${requiredApps.length > 0 ? `
+                If you see the user open ChatGPT → add "${requiredApps.find(a => a.includes('ChatGPT')) || 'ChatGPT Web Interface'}"
+                If you see the user open Claude → add "${requiredApps.find(a => a.includes('Claude')) || 'Claude'}"
+                If you see the user open Perplexity → add "${requiredApps.find(a => a.includes('Perplexity')) || 'Perplexity'}"
+                If you see the user open LibreOffice → add "${requiredApps.find(a => a.includes('LibreOffice')) || 'LibreOffice Writer'}"
+
+                CORRECT example: "apps_opened": ["${requiredApps[0]}", "${requiredApps[1] || ''}"]
+                WRONG example: "apps_opened": ["ChatGPT", "Claude AI"] ← These don't match exactly!
+                ` : ''}
+
+                Think step-by-step:
+                1. Watch the video and identify which apps were opened
+                2. For each app, find its EXACT name in the REQUIRED APPS list
+                3. Copy that exact name (with quotes) into your apps_opened array
             `;
 
             const filterResult = await this.executeWithRetry(
@@ -223,6 +262,40 @@ export class VideoGrader {
 
             this.logger.info(`Filter result: ${filterResult.text}`);
             const filterResponse = JSON.parse(filterResult.text!);
+
+            // Programmatic check: verify all required apps were opened
+            if (requiredApps.length > 0) {
+                const appsOpened: string[] = filterResponse.apps_opened || [];
+                const missingApps = requiredApps.filter(required =>
+                    !appsOpened.includes(required)
+                );
+
+                this.logger.debug(`Apps check: Required ${requiredApps.length}, Opened ${appsOpened.length}`, undefined, {
+                    required: requiredApps,
+                    opened: appsOpened,
+                    missing: missingApps
+                });
+
+                if (missingApps.length > 0) {
+                    // Override Flash's decision if apps are missing
+                    this.logger.warn(`Session filtered out: Missing required apps`, undefined, { missingApps });
+                    return {
+                        version: `${packageJson.version}-video-filtered`,
+                        score: 20,
+                        outcomeAchievement: 0,
+                        processQuality: 0,
+                        efficiency: 0,
+                        confidence: 100,
+                        summary: `Filtered: Missing required apps (${missingApps.join(', ')})`,
+                        observations: `User opened ${appsOpened.length}/${requiredApps.length} required apps`,
+                        reasoning: `Workflow requires all ${requiredApps.length} apps. User only opened: ${appsOpened.join(', ')}. Missing: ${missingApps.join(', ')}`,
+                        outcomeAchievementReasoning: "Incomplete workflow - not all required apps used.",
+                        processQualityReasoning: "N/A (Filtered)",
+                        efficiencyReasoning: "N/A (Filtered)",
+                        confidenceReasoning: "Programmatic check confirmed missing apps."
+                    };
+                }
+            }
 
             if (!filterResponse.passed) {
                 this.logger.warn(`Session filtered out by Flash. Reason: ${filterResponse.reason}`);

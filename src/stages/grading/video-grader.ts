@@ -295,38 +295,38 @@ Opening ${Math.floor(requiredApps.length / 2)} out of ${requiredApps.length} app
                     this.logger.warn(`Session filtered out: Missing required apps`, undefined, { missingApps });
                     return {
                         version: `${packageJson.version}-video-filtered`,
-                        score: 20,
+                        score: 0,
                         outcomeAchievement: 0,
                         processQuality: 0,
                         efficiency: 0,
                         confidence: 100,
-                        summary: `Filtered: Missing required apps (${missingApps.join(', ')})`,
+                        summary: `Missing required apps (${missingApps.join(', ')})`,
                         observations: `User opened ${appsOpened.length}/${requiredApps.length} required apps`,
-                        reasoning: `Workflow requires all ${requiredApps.length} apps. User only opened: ${appsOpened.join(', ')}. Missing: ${missingApps.join(', ')}`,
+                        reasoning: filterResponse.reason,
                         outcomeAchievementReasoning: "Incomplete workflow - not all required apps used.",
-                        processQualityReasoning: "N/A (Filtered)",
-                        efficiencyReasoning: "N/A (Filtered)",
-                        confidenceReasoning: "Programmatic check confirmed missing apps."
+                        processQualityReasoning: "N/A",
+                        efficiencyReasoning: "N/A",
+                        confidenceReasoning: "Confidence in the analysis of the video."
                     };
                 }
             }
 
             if (!filterResponse.passed) {
-                this.logger.warn(`Session filtered out by Flash. Reason: ${filterResponse.reason}`);
+                this.logger.warn(`Session filtered out. Reason: ${filterResponse.reason}`);
                 return {
                     version: `${packageJson.version}-video-filtered`,
-                    score: 20,
+                    score: 0,
                     outcomeAchievement: 0,
                     processQuality: 0,
                     efficiency: 0,
                     confidence: 100,
-                    summary: `Filtered by ${this.filterModelName}. Reason: ${filterResponse.reason}`,
-                    observations: "N/A (Filtered)",
+                    summary: "The preliminary checks were unsuccessful.",
+                    observations: "N/A",
                     reasoning: filterResponse.reason,
-                    outcomeAchievementReasoning: "Objective not visible in video.",
+                    outcomeAchievementReasoning: "N/A",
                     processQualityReasoning: "N/A",
                     efficiencyReasoning: "N/A",
-                    confidenceReasoning: "Fast check determined failure."
+                    confidenceReasoning: "Confidence in the analysis of the video."
                 };
             }
 

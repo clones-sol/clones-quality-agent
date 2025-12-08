@@ -66,7 +66,7 @@ export class VideoGrader {
     private genAI: GoogleGenAI;
     private logger: GraderLogger;
     private expertModelName: string;
-    private filterModelName: string = "gemini-2.0-flash";
+    private filterModelName: string = "gemini-2.5-flash";  // Hybrid reasoning model, less hallucination
     private maxRetries: number;
 
     private weights = {
@@ -82,7 +82,11 @@ export class VideoGrader {
         this.genAI = new GoogleGenAI({ apiKey: config.apiKey });
         this.logger = logger ?? new DefaultLogger();
 
-        this.expertModelName = config.model || "gemini-2.0-flash";
+        // Cost optimization for ~90s videos:
+        // - Filter uses 2.5-flash ($0.01/video) for critical hallucination prevention
+        // - Expert uses 2.0-flash ($0.003/video) after validated filter pass
+        // Total: ~$0.014/video vs $0.021 (both 2.5) or $0.006 (both 2.0 with hallucinations)
+        this.expertModelName = config.model || "gemini-2.0-flash";  // After filter validation, cheaper is OK
         this.maxRetries = config.maxRetries ?? 3; // Default to 3 retries
     }
 

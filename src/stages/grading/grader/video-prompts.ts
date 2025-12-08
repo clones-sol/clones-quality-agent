@@ -44,6 +44,28 @@ You must output a strictly valid JSON object matching the provided schema.
 - **reasoning:** Provide a detailed chain-of-thought explaining your scoring.
 - **observations:** List purely factual visual observations (e.g., "At 00:15, user clicked the blue 'Save' button").
 
+### STEPS ANALYSIS - STATUS RULES (CRITICAL)
+For each objective in steps_analysis, you MUST assign ONE status:
+
+**"success"** - Objective COMPLETED and VISIBLE in the video
+  - User opened the app AND used it for its intended purpose
+  - Example: "Open ChatGPT and brainstorm" → User opened ChatGPT AND typed/generated ideas
+  - Evidence: You can SEE text generated, buttons clicked, content created
+
+**"failed"** - Objective NOT completed but you CAN SEE it wasn't done
+  - User opened the app but did NOT use it (just switched away)
+  - User never reached this step in the workflow
+  - Example: "Document all ideas" → App is blank, no text visible, user just opened it
+  - Evidence: Empty document, no interaction, just tab switching
+
+**"neutral"** - ONLY when you CANNOT determine from the video
+  - Action happened OFF-SCREEN (example: user minimized window)
+  - Video quality too poor to see if action completed
+  - User typed something but text is unreadable due to blur
+  - Example: User was in ChatGPT but video cropped, can't see if they typed
+
+DO NOT use "neutral" as a default or soft "maybe". If you can SEE the screen and nothing happened → "failed".
+
 ### WORKFLOW ENGAGEMENT RULES
 - If the user touches multiple apps as requested (Workflow), reward them.
 - If the user stays in a single app when a workflow was requested, cap the Process Score.
@@ -80,11 +102,31 @@ export function getVideoUserPrompt(meta: MetaData): string {
     return `
 ${context}
 
-Analyze the attached video. 
-1. Watch the entire sequence.
-2. Verify if the objectives listed above were met VISUALLY.
-3. Pay special attention to the APPS used. Are they the correct ones?
-4. Generate the grade and detailed reasoning.
+Analyze the attached video and evaluate EVERY objective listed above.
+
+CRITICAL: Your steps_analysis array MUST contain EXACTLY ${meta.quest?.objectives?.length || 0} entries.
+One entry per objective, in the same order as the QUEST OBJECTIVES list.
+
+For EACH objective (${meta.quest?.objectives?.length || 0} total):
+1. Copy the objective description exactly as written above
+2. Find the timestamp (in seconds) where this objective was attempted or completed
+3. Determine the status:
+   - "success" = COMPLETED (you see action taken + result visible)
+   - "failed" = NOT done (no interaction, empty screen, or just opened/closed app without use)
+   - "neutral" = ONLY if off-screen or unreadable (very rare!)
+
+Example format for steps_analysis with 3 objectives:
+[
+  {"description": "Objective 1 text here", "status": "success", "timestamp_seconds": 5},
+  {"description": "Objective 2 text here", "status": "failed", "timestamp_seconds": 0},
+  {"description": "Objective 3 text here", "status": "failed", "timestamp_seconds": 0}
+]
+
+CRITICAL RULES:
+- Do NOT skip objectives or merge them
+- Do NOT invent new objectives not in the list
+- If an objective wasn't attempted → status "failed", timestamp 0
+- Just opening an app is NOT success - the user must USE it for the objective's purpose
 `;
 }
 

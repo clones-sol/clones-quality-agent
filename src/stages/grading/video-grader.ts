@@ -175,6 +175,13 @@ Opening ${Math.floor(requiredApps.length / 2)} out of ${requiredApps.length} app
                 Required objectives:
                 ${objectivesList}${appRequirementText}
 
+                ⚠️ CRITICAL: REPORT ONLY WHAT YOU ACTUALLY SEE ⚠️
+                - Do NOT hallucinate, invent, or assume content that isn't visible
+                - Do NOT confuse similar apps (e.g., Word ≠ LibreOffice, Chrome ≠ Firefox)
+                - If no apps from the REQUIRED APPS list are visible → apps_opened should be []
+                - If you cannot clearly identify an app → do NOT add it to apps_opened
+                - When uncertain → err on the side of FAIL rather than guessing
+
                 This is a COST-SAVING filter. Only FAIL sessions that are CLEARLY worthless:
 
                 AUTOMATIC FAIL (reject immediately):
@@ -251,6 +258,9 @@ Opening ${Math.floor(requiredApps.length / 2)} out of ${requiredApps.length} app
                             }
                         ],
                         config: {
+                            temperature: 0.0,  // Deterministic, factual responses only
+                            topP: 0.1,         // Very conservative token selection
+                            topK: 1,           // Always pick the most likely token
                             responseMimeType: "application/json",
                             responseSchema: filterSchema as any
                         }
@@ -340,6 +350,8 @@ Opening ${Math.floor(requiredApps.length / 2)} out of ${requiredApps.length} app
                             }
                         ],
                         config: {
+                            temperature: 0.2,  // Low but allows some reasoning flexibility
+                            topP: 0.3,         // Conservative but not too restrictive
                             responseMimeType: "application/json",
                             responseSchema: gradingSchema as any
                         }
@@ -351,6 +363,33 @@ Opening ${Math.floor(requiredApps.length / 2)} out of ${requiredApps.length} app
 
             const responseText = result.text!;
             const evaluation = JSON.parse(responseText);
+
+            // Validate steps_analysis completeness
+            const expectedSteps = meta.quest?.objectives?.length || 0;
+            const actualSteps = evaluation.steps_analysis?.length || 0;
+
+            if (expectedSteps > 0 && actualSteps !== expectedSteps) {
+                this.logger.warn(`steps_analysis mismatch: expected ${expectedSteps}, got ${actualSteps}`, undefined, {
+                    expected: expectedSteps,
+                    actual: actualSteps,
+                    sessionId: meta.sessionId
+                });
+
+                // Fill missing entries with "failed" status
+                if (!evaluation.steps_analysis) {
+                    evaluation.steps_analysis = [];
+                }
+
+                for (let i = actualSteps; i < expectedSteps; i++) {
+                    evaluation.steps_analysis.push({
+                        description: meta.quest!.objectives![i],
+                        status: "failed",
+                        timestamp_seconds: 0
+                    });
+                }
+
+                this.logger.debug(`Padded steps_analysis to ${expectedSteps} entries`);
+            }
 
             // ---------------------------------------------------------
             // STEP 3: SCORING & CALIBRATION (Ported from grader.ts)

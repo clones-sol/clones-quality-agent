@@ -116,12 +116,22 @@ export class VideoGrader {
             // 2. Wait for processing
             let file = await this.genAI.files.get({ name: uploadResult.name! });
             let attempts = 0;
-            const maxAttempts = 60; // 2 minutes max
+            // Timeout based on video size: ~1min per MB, minimum 3min, max 10min
+            const videoSizeMB = stats.size / 1024 / 1024;
+            const estimatedMinutes = Math.max(3, Math.min(10, Math.ceil(videoSizeMB)));
+            const maxAttempts = estimatedMinutes * 30; // Check every 2s
+
+            this.logger.debug(`Waiting for Google to process video (max ${estimatedMinutes}min for ${videoSizeMB.toFixed(2)}MB)`);
 
             while (file.state === FileState.PROCESSING && attempts < maxAttempts) {
                 await new Promise((resolve) => setTimeout(resolve, 2000));
                 file = await this.genAI.files.get({ name: uploadResult.name! });
                 attempts++;
+
+                // Log progress every 30 seconds
+                if (attempts % 15 === 0) {
+                    this.logger.debug(`Still processing... ${attempts * 2}s elapsed (max ${maxAttempts * 2}s)`);
+                }
             }
 
             if (file.state === FileState.FAILED) {
